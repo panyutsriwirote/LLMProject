@@ -1,173 +1,25 @@
-from script.new_wangchan import NewWangchanForMaskedLM
+from script import (
+    NewWangchanForMaskedLM,
+    Config,
+    RepreparableAccelerator as Accelerator,
+    CHECKPOINT_FORMAT,
+    get_layer_params,
+    check_layer_is_exhaustive,
+    get_optimizer_param_groups
+)
 from datasets import load_from_disk, Dataset
-from transformers import AutoTokenizer, DataCollatorForLanguageModeling, get_scheduler, PreTrainedModel
-from torch.nn import Module, Parameter
+from transformers import AutoTokenizer, DataCollatorForLanguageModeling, get_scheduler
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from accelerate import Accelerator
+from torch.distributed.elastic.multiprocessing.errors import record
 from accelerate.utils import find_executable_batch_size, RNG_STATE_NAME
 from tqdm.auto import tqdm
-from argparse import ArgumentParser, Namespace
-from typing import Literal, TypedDict
-from functools import reduce
+from argparse import ArgumentParser
+from typing import Literal
 from shutil import copyfile, SameFileError
 from os import makedirs, listdir, path
 from sys import stdout
-from dataclasses import dataclass
-import torch, tomllib, re, random, numpy
-
-@dataclass
-class TrainingConfig:
-    num_epochs: int
-    batch_size: int
-    eval_steps: Literal["no", "epoch", "once"] | int
-    save_steps: Literal["no", "epoch", "once"] | int
-    gradient_accumulation_steps: int
-    mixed_precision: str
-
-    def __str__(self):
-        return f"{self.__class__.__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
-
-@dataclass
-class OptimizerConfig:
-    peak_lr: float
-    weight_decay: float
-    eps: float
-    betas: tuple[float, float]
-    layer_lr_decay_factor: int | None
-
-    def __str__(self):
-        return f"{self.__class__.__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
-
-@dataclass
-class SchedulerConfig:
-    num_warmup_steps: int
-    max_steps: int
-
-    def __str__(self):
-        return f"{self.__class__.__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
-
-@dataclass
-class UnfreezingConfig:
-    mode: Literal["epoch", "step"]
-    schedule: list[int]
-
-    def __str__(self):
-        return f"{self.__class__.__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
-
-@dataclass
-class Layer:
-    include: list[str]
-    exclude: list[str] | None = None
-
-    def __str__(self):
-        return f"{self.include}{f' - {self.exclude}' if self.exclude else ''}"
-
-@dataclass
-class LayerConfig:
-    layers: list[Layer]
-
-    def __str__(self):
-        return f"{self.__class__.__name__}(\n" + '\n'.join(f"    {layer}" for layer in self.layers) + "\n)"
-
-@dataclass
-class ScriptConfig:
-    model_dir: str | None
-    config_file: str
-    train_data: str
-    eval_data: str
-    continue_from_checkpoint: bool
-
-    def __str__(self):
-        return f"{self.__class__.__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
-
-@dataclass
-class Config:
-    training_config: TrainingConfig
-    optimizer_config: OptimizerConfig
-    scheduler_config: SchedulerConfig
-    unfreezing_config: UnfreezingConfig | None
-    layer_config: LayerConfig | None
-    script_config: ScriptConfig
-
-    def __str__(self):
-        return '\n'.join(str(v) for v in vars(self).values() if v is not None)
-
-    @classmethod
-    def from_args(cls, args: Namespace):
-        if args.config_file is None:
-            if args.model_dir is None:
-                raise ValueError("Cannot determine config file path. Please specify --model_dir or --config_file")
-            args.config_file = path.join(args.model_dir, "last_config.toml")
-        script_config = ScriptConfig(**vars(args))
-        with open(script_config.config_file, "rb") as f:
-            config = tomllib.load(f)
-        config = cls(
-            training_config=TrainingConfig(**config["training"]),
-            optimizer_config=OptimizerConfig(**config["optimizer"]),
-            scheduler_config=SchedulerConfig(**config["scheduler"]),
-            unfreezing_config=UnfreezingConfig(**config["unfreezing"]) if "unfreezing" in config else None,
-            layer_config=LayerConfig(
-                [Layer(**layer) for layer in config["layer"]]
-            ) if "layer" in config else None,
-            script_config=script_config
-        )
-        if (
-            config.unfreezing_config is not None or
-            config.optimizer_config.layer_lr_decay_factor is not None
-        ) and config.layer_config is None:
-            raise ValueError("Must specify 'layer' when using 'gradual unfreezing' or 'discriminative fine-tuning'")
-        if (
-            config.training_config.save_steps != "no" or
-            script_config.continue_from_checkpoint
-        ) and config.script_config.model_dir is None:
-            raise ValueError("Cannot determine model directory. Please specify --model_dir")
-        if (
-            config.unfreezing_config is not None and
-            len(config.layer_config.layers) != len(config.unfreezing_config.schedule)
-        ):
-            raise ValueError(
-                f"Length of 'layer' and 'schedule' must be the same. "
-                f"Got {len(config.layer_config.layers)} and {len(config.unfreezing_config.schedule)}"
-            )
-        if (
-            config.training_config.eval_steps not in ("no", "epoch", "once") and
-            not isinstance(config.training_config.eval_steps, int)
-        ):
-            raise ValueError(
-                f"'eval_steps' must be one of 'no', 'epoch', 'once' or an integer. "
-                f"Got {config.training_config.eval_steps}"
-            )
-        if (
-            config.training_config.save_steps not in ("no", "epoch", "once") and
-            not isinstance(config.training_config.save_steps, int)
-        ):
-            raise ValueError(
-                f"'save_steps' must be one of 'no', 'epoch', 'once' or an integer. "
-                f"Got {config.training_config.save_steps}"
-            )
-        return config
-
-class ParameterGroup(TypedDict):
-    params: list[Parameter]
-    lr: float
-
-CHECKPOINT_FORMAT = re.compile(r"step_\d+")
-
-# Util functions
-def get_module(model: PreTrainedModel, name: str) -> Module | Parameter:
-    return reduce(getattr, name.split('.'), model)
-def get_params(model: PreTrainedModel, name: str):
-    module = get_module(model, name)
-    if isinstance(module, Parameter):
-        yield module
-    else:
-        for param in module.parameters():
-            yield param
-def get_layer_params(model: PreTrainedModel, layer: Layer):
-    include = {param for name in layer.include for param in get_params(model, name)}
-    exclude = {param for name in layer.exclude for param in get_params(model, name)} if layer.exclude is not None else set()
-    return include - exclude
+import torch, random, numpy
 
 # Training function
 def main(config: Config):
@@ -199,6 +51,7 @@ def main(config: Config):
         if accelerator.is_main_process:
             print(string)
 
+    @record
     @find_executable_batch_size(starting_batch_size=training_config.batch_size)
     def inner_train(batch_size: int):
         nonlocal accelerator
@@ -216,17 +69,7 @@ def main(config: Config):
 
         # Validate layer config
         if layer_config is not None:
-            def check_layer_is_exhaustive():
-                accounted_for: set[Parameter] = set()
-                for layer in layer_config.layers:
-                    accounted_for.update(get_layer_params(model, layer))
-                num_unaccounted_for = len(set(model.parameters()) - accounted_for)
-                if num_unaccounted_for != 0:
-                    raise ValueError(
-                        f"'layer' defined in {script_config.config_file} is not exhaustive."
-                        f" {num_unaccounted_for} parameters are not accounted for."
-                    )
-            check_layer_is_exhaustive()
+            check_layer_is_exhaustive(model, config)
 
         # Freeze everything
         if unfreezing_config is not None:
@@ -264,27 +107,8 @@ def main(config: Config):
         )
 
         # Optimizer
-        def get_optimizer_param_groups():
-            if optimizer_config.layer_lr_decay_factor is None:
-                return model.parameters()
-            else:
-                # Discriminative fine-tuning
-                params: list[ParameterGroup] = []
-                param_set: set[Parameter] = set()
-                current_lr = optimizer_config.peak_lr
-                decay_factor = optimizer_config.layer_lr_decay_factor
-                for layer in layer_config.layers:
-                    param_group = ParameterGroup(params=[], lr=current_lr)
-                    for param in get_layer_params(model, layer):
-                        if param not in param_set:
-                            param_group["params"].append(param)
-                            param_set.add(param)
-                    params.append(param_group)
-                    current_lr /= decay_factor
-                return params
-
         optimizer = AdamW(
-            params=get_optimizer_param_groups(),
+            params=get_optimizer_param_groups(model, config),
             lr=optimizer_config.peak_lr,
             weight_decay=optimizer_config.weight_decay,
             eps=optimizer_config.eps,
@@ -303,7 +127,6 @@ def main(config: Config):
         model, optimizer, lr_scheduler, train_dataloader, eval_dataloader = accelerator.prepare(
             model, optimizer, lr_scheduler, train_dataloader, eval_dataloader
         )
-        unwrapped_model = accelerator.unwrap_model(model)
 
         # Load from checkpoint
         if script_config.continue_from_checkpoint:
@@ -327,8 +150,9 @@ def main(config: Config):
         num_batches_per_epoch = len(train_dataloader)
         num_update_steps_per_epoch = -(num_batches_per_epoch // -training_config.gradient_accumulation_steps)
         num_training_steps = num_epochs * num_update_steps_per_epoch
-        progress_bar = tqdm(initial=step, total=num_training_steps, file=stdout, disable=not accelerator.is_main_process)
         epoch, num_skipped = divmod(step, num_update_steps_per_epoch)
+        if num_skipped != 0:
+            epoch += 1
 
         def get_action_step(step_config: Literal["no", "once", "epoch"] | int):
             if step_config == "no":
@@ -344,21 +168,35 @@ def main(config: Config):
 
         # Gradual unfreezing
         def get_unfreeze_func():
+            nonlocal model
             if unfreezing_config is None:
-                return lambda: None
+                return lambda _: None
             else:
                 layers = layer_config.layers
                 schedule = unfreezing_config.schedule
                 if unfreezing_config.mode == "epoch":
                     schedule = (n * num_update_steps_per_epoch for n in schedule)
-                step_to_param = dict(zip(schedule, layers))
-                def unfreeze():
-                    if step in step_to_param:
-                        layer = step_to_param[step]
+                step_to_layer = dict(zip(schedule, layers))
+                def unfreeze(step: int, reprepare: bool = True):
+                    nonlocal model
+                    if step in step_to_layer:
+                        layer = step_to_layer[step]
+                        unwrapped_model = accelerator.unwrap_model(model)
                         for param in get_layer_params(unwrapped_model, layer):
                             param.requires_grad = True
-                        del step_to_param[step]
+                        del step_to_layer[step]
                         print_on_main(f"Unfreezed {layer}")
+                        if reprepare:
+                            model = accelerator.prepare(unwrapped_model)
+                            model.train()
+                # Unfreeze already-unfreezed layers
+                for i in sorted(step_to_layer):
+                    if i < step:
+                        unfreeze(i, reprepare=False)
+                        continue
+                    elif any(param.requires_grad for param in model.parameters()):
+                        model = accelerator.prepare(accelerator.unwrap_model(model))
+                    break
                 return unfreeze
         unfreeze = get_unfreeze_func()
 
@@ -375,13 +213,14 @@ def main(config: Config):
             print_on_main(f">>> Step {step} (Epoch {epoch}): Mean Loss: {torch.mean(losses)}")
 
         # Training loop
+        progress_bar = tqdm(initial=step, total=num_training_steps, file=stdout, disable=not accelerator.is_main_process)
         def train_epoch(dataloader: DataLoader):
             nonlocal step
             model.train()
             for batch in dataloader:
+                # Unfreeze
+                unfreeze(step)
                 with accelerator.accumulate(model):
-                    # Unfreeze
-                    unfreeze()
                     # Forward
                     outputs = model(**batch)
                     # Backward
@@ -419,21 +258,22 @@ def main(config: Config):
         # Evaluation before training
         eval()
 
-        # First epoch if skipped
-        if num_skipped:
+        # First epoch
+        if num_skipped != 0:
             print_on_main(f"Skipped first {num_skipped} steps in train dataloader")
             skipped_dataloader = accelerator.skip_first_batches(
                 train_dataloader,
                 num_skipped * training_config.gradient_accumulation_steps
             )
             train_epoch(skipped_dataloader)
-            epoch += 1
+        epoch += 1
 
         # Reamining epochs
         for epoch in range(epoch, num_epochs+1):
             train_epoch(train_dataloader)
 
         print_on_main("Training finished according to configuration")
+
     try:
         inner_train()
     except Exception as e:

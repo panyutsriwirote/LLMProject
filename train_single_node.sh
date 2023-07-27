@@ -14,6 +14,7 @@ ml Miniconda3
 conda activate /project/lt200063-idcd/envs
 
 export TRANSFORMERS_NO_ADVISORY_WARNINGS=1
+export TORCHELASTIC_ERROR_FILE="pytorch_error.json"
 
 accelerate launch \
     --config_file config/accelerate/single_node_multi_gpu.yaml \
