@@ -1,8 +1,6 @@
 from script import (
     NewWangchanForMaskedLM,
     Config,
-    RepreparableAccelerator as Accelerator,
-    CHECKPOINT_FORMAT,
     get_layer_params,
     check_layer_is_exhaustive,
     get_optimizer_param_groups
@@ -12,14 +10,17 @@ from transformers import AutoTokenizer, DataCollatorForLanguageModeling, get_sch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.distributed.elastic.multiprocessing.errors import record
-from accelerate.utils import find_executable_batch_size, RNG_STATE_NAME
+from accelerate import Accelerator, find_executable_batch_size
+from accelerate.utils import RNG_STATE_NAME
 from tqdm.auto import tqdm
 from argparse import ArgumentParser
 from typing import Literal
 from shutil import copyfile, SameFileError
 from os import makedirs, listdir, path
 from sys import stdout
-import torch, random, numpy
+import torch, re, random, numpy
+
+CHECKPOINT_FORMAT = re.compile(r"step_\d+")
 
 # Training function
 def main(config: Config):
@@ -71,12 +72,6 @@ def main(config: Config):
         if layer_config is not None:
             check_layer_is_exhaustive(model, config)
 
-        # Freeze everything
-        if unfreezing_config is not None:
-            for param in model.parameters():
-                param.requires_grad = False
-            print_on_main("Freezed all parameters")
-
         # Data loaders
         data_collator = DataCollatorForLanguageModeling(
             tokenizer=AutoTokenizer.from_pretrained("model"),
@@ -127,6 +122,7 @@ def main(config: Config):
         model, optimizer, lr_scheduler, train_dataloader, eval_dataloader = accelerator.prepare(
             model, optimizer, lr_scheduler, train_dataloader, eval_dataloader
         )
+        print_on_main(f"Wrapped model into '{type(model).__name__}'")
 
         # Load from checkpoint
         if script_config.continue_from_checkpoint:
@@ -168,35 +164,33 @@ def main(config: Config):
 
         # Gradual unfreezing
         def get_unfreeze_func():
-            nonlocal model
             if unfreezing_config is None:
                 return lambda _: None
             else:
+                # Freeze everything
+                for param in model.parameters():
+                    param.requires_grad = False
+                print_on_main("Freezed all parameters")
+                # Define unfreezing function
                 layers = layer_config.layers
                 schedule = unfreezing_config.schedule
                 if unfreezing_config.mode == "epoch":
                     schedule = (n * num_update_steps_per_epoch for n in schedule)
                 step_to_layer = dict(zip(schedule, layers))
-                def unfreeze(step: int, reprepare: bool = True):
-                    nonlocal model
+                unwrapped_model = accelerator.unwrap_model(model)
+                def unfreeze(step: int):
                     if step in step_to_layer:
                         layer = step_to_layer[step]
-                        unwrapped_model = accelerator.unwrap_model(model)
                         for param in get_layer_params(unwrapped_model, layer):
                             param.requires_grad = True
                         del step_to_layer[step]
                         print_on_main(f"Unfreezed {layer}")
-                        if reprepare:
-                            model = accelerator.prepare(unwrapped_model)
-                            model.train()
                 # Unfreeze already-unfreezed layers
                 for i in sorted(step_to_layer):
                     if i < step:
-                        unfreeze(i, reprepare=False)
-                        continue
-                    elif any(param.requires_grad for param in model.parameters()):
-                        model = accelerator.prepare(accelerator.unwrap_model(model))
-                    break
+                        unfreeze(i)
+                    else:
+                        break
                 return unfreeze
         unfreeze = get_unfreeze_func()
 
@@ -211,6 +205,7 @@ def main(config: Config):
                 losses.append(accelerator.gather_for_metrics(loss.repeat(batch_size)))
             losses = torch.cat(losses)
             print_on_main(f">>> Step {step} (Epoch {epoch}): Mean Loss: {torch.mean(losses)}")
+            model.train()
 
         # Training loop
         progress_bar = tqdm(initial=step, total=num_training_steps, file=stdout, disable=not accelerator.is_main_process)
@@ -255,6 +250,7 @@ def main(config: Config):
                                 states["torch_cuda_manual_seed"] = torch.cuda.get_rng_state_all()
                                 output_states_file = path.join(checkpoint_dir, states_name)
                                 torch.save(states, output_states_file)
+
         # Evaluation before training
         eval()
 
