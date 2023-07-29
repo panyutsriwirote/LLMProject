@@ -185,10 +185,11 @@ def main(config: Config):
                         for param in get_layer_params(unwrapped_model, layer):
                             param.requires_grad = True
                         del step_to_layer[step]
-                        print_on_main(f"Unfreezed {layer}")
+                        print_on_main(f"Step {step}: Unfreezed {layer}")
                         if reprepare:
                             model = accelerator.prepare(unwrapped_model)
                             release_memory()
+                            print_on_main(f"{sum(not param.requires_grad for param in model.parameters())} parameters still frozen")
                             model.train()
                 # Unfreeze already-unfreezed layers
                 for i in sorted(step_to_layer):
@@ -197,6 +198,7 @@ def main(config: Config):
                     else:
                         model = accelerator.prepare(accelerator.unwrap_model(model))
                         release_memory()
+                        print_on_main(f"{sum(not param.requires_grad for param in model.parameters())} parameters still frozen")
                         break
                 return unfreeze
         unfreeze = get_unfreeze_func()
