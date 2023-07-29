@@ -11,7 +11,7 @@ from transformers import AutoTokenizer, DataCollatorForLanguageModeling, get_sch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.distributed.elastic.multiprocessing.errors import record
-from accelerate.utils import RNG_STATE_NAME, find_executable_batch_size, release_memory
+from accelerate.utils import RNG_STATE_NAME, release_memory
 from tqdm.auto import tqdm
 from argparse import ArgumentParser
 from typing import Literal
@@ -23,6 +23,7 @@ import torch, re, random, numpy
 CHECKPOINT_FORMAT = "step_{step}"
 
 # Training function
+@record
 def main(config: Config):
     # Extract config
     training_config = config.training_config
@@ -53,17 +54,13 @@ def main(config: Config):
         if accelerator.is_main_process:
             print(string)
 
-    @record
-    @find_executable_batch_size(starting_batch_size=training_config.batch_size)
-    def inner_train(batch_size: int):
-        nonlocal accelerator
-        accelerator.free_memory()
+    try:
         print_on_main(
             "Try training with effective batch size = "
-            f"per_device ({batch_size}) * "
+            f"per_device ({training_config.batch_size}) * "
             f"num_devices ({accelerator.num_processes}) * "
             f"gradient_accumulation_steps ({training_config.gradient_accumulation_steps})"
-            f" = {batch_size * accelerator.num_processes * training_config.gradient_accumulation_steps}"
+            f" = {training_config.batch_size * accelerator.num_processes * training_config.gradient_accumulation_steps}"
         )
 
         # Load model
@@ -93,12 +90,12 @@ def main(config: Config):
         train_dataloader = DataLoader(
             dataset=get_dataset(script_config.train_data),
             shuffle=True,
-            batch_size=batch_size,
+            batch_size=training_config.batch_size,
             collate_fn=data_collator
         )
         eval_dataloader = DataLoader(
             dataset=get_dataset(script_config.eval_data),
-            batch_size=batch_size,
+            batch_size=training_config.batch_size,
             collate_fn=data_collator
         )
 
@@ -207,15 +204,36 @@ def main(config: Config):
         # Evaluation
         def eval():
             model.eval()
-            losses = []
+            total_loss = 0
+            n = 0
             for batch in eval_dataloader:
                 with torch.no_grad():
-                    outputs = model(**batch)
-                loss = outputs.loss
-                losses.append(accelerator.gather_for_metrics(loss.repeat(batch_size)))
-            losses = torch.cat(losses)
-            print_on_main(f">>> Step {step} (Epoch {epoch}): Mean Loss: {torch.mean(losses)}")
+                    loss = model(**batch).loss
+                losses = accelerator.gather_for_metrics(loss.repeat(training_config.batch_size))
+                total_loss += torch.sum(losses)
+                n += len(losses)
+            print_on_main(f">>> Step {step} (Epoch {epoch}): Mean Loss: {total_loss / n}")
             model.train()
+
+        # Saving
+        def save_checkpoint():
+            accelerator.wait_for_everyone()
+            checkpoint_dir = path.join(script_config.model_dir, CHECKPOINT_FORMAT.format(step=step))
+            if accelerator.is_main_process:
+                accelerator.save_state(checkpoint_dir)
+                print(f"Saved checkpoint to '{checkpoint_dir}'")
+                # Random state of main process is already saved here
+            else:
+                # Save random state of other processes
+                makedirs(checkpoint_dir, exist_ok=True)
+                states = {}
+                states_name = f"{RNG_STATE_NAME}_{accelerator.state.process_index}.pkl"
+                states["random_state"] = random.getstate()
+                states["numpy_random_seed"] = numpy.random.get_state()
+                states["torch_manual_seed"] = torch.get_rng_state()
+                states["torch_cuda_manual_seed"] = torch.cuda.get_rng_state_all()
+                output_states_file = path.join(checkpoint_dir, states_name)
+                torch.save(states, output_states_file)
 
         # Training loop
         progress_bar = tqdm(initial=step, total=num_training_steps, file=stdout, disable=not accelerator.is_main_process)
@@ -227,9 +245,9 @@ def main(config: Config):
                 unfreeze(step)
                 with accelerator.accumulate(model):
                     # Forward
-                    outputs = model(**batch)
+                    loss = model(**batch).loss
                     # Backward
-                    accelerator.backward(outputs.loss)
+                    accelerator.backward(loss)
                     # Step
                     optimizer.step()
                     lr_scheduler.step()
@@ -243,23 +261,7 @@ def main(config: Config):
                             eval()
                         # Save model
                         if save_steps and step % save_steps == 0:
-                            accelerator.wait_for_everyone()
-                            checkpoint_dir = path.join(script_config.model_dir, CHECKPOINT_FORMAT.format(step=step))
-                            if accelerator.is_main_process:
-                                accelerator.save_state(checkpoint_dir)
-                                print(f"Saved checkpoint to '{checkpoint_dir}'")
-                                # Random state of main process is already saved here
-                            else:
-                                # Save random state of other processes
-                                makedirs(checkpoint_dir, exist_ok=True)
-                                states = {}
-                                states_name = f"{RNG_STATE_NAME}_{accelerator.state.process_index}.pkl"
-                                states["random_state"] = random.getstate()
-                                states["numpy_random_seed"] = numpy.random.get_state()
-                                states["torch_manual_seed"] = torch.get_rng_state()
-                                states["torch_cuda_manual_seed"] = torch.cuda.get_rng_state_all()
-                                output_states_file = path.join(checkpoint_dir, states_name)
-                                torch.save(states, output_states_file)
+                            save_checkpoint()
 
         # Evaluation before training
         eval()
@@ -278,10 +280,14 @@ def main(config: Config):
         for epoch in range(epoch, num_epochs+1):
             train_epoch(train_dataloader)
 
+        # Final eval and save if haven't done so
+        if eval_steps and step % eval_steps != 0:
+            eval()
+        if save_steps and step % save_steps != 0:
+            save_checkpoint()
+
         print_on_main("Training finished according to configuration")
 
-    try:
-        inner_train()
     except Exception as e:
         print_on_main(e)
         raise

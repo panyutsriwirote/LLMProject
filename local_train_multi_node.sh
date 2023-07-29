@@ -11,4 +11,4 @@ accelerate launch \
     --model_dir checkpoints/first_run \
     --train_data train_eval_test/train \
     --eval_data train_eval_test/eval \
-    --config_file config/training/default_training_config.toml
+    --config_file config/training/training_config.toml

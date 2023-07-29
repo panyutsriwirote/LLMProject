@@ -22,4 +22,4 @@ accelerate launch \
     --model_dir checkpoints/test_model \
     --train_data train_eval_test/eval \
     --eval_data train_eval_test/test \
-    --config_file config/training/default_training_config.toml
+    --config_file config/training/test_config.toml
