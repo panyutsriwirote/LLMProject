@@ -1,6 +1,6 @@
 from .config import Config, Layer
-from typing import TypedDict, Generic, TypeVar, Self
-from collections.abc import Iterable, Hashable
+from typing import TypedDict, TypeVar, Required
+from collections.abc import Iterable, Hashable, Set
 from torch.nn import Module, Parameter
 from transformers import PreTrainedModel
 from functools import reduce
@@ -17,17 +17,15 @@ def get_params(model: PreTrainedModel, name: str):
             yield param
 
 T = TypeVar('T', bound=Hashable)
-class OrderedSet(Generic[T]):
+class OrderedSet(Set[T]):
     def __init__(self, iterable: Iterable[T]):
         self._dict = dict.fromkeys(iterable)
     def __contains__(self, item):
         return item in self._dict
     def __iter__(self):
         return iter(self._dict)
-    def __sub__(self, other) -> Self:
-        if not isinstance(other, (type(self), set)):
-            return NotImplemented
-        return type(self)(item for item in self if item not in other)
+    def __len__(self):
+        return len(self._dict)
     def __repr__(self):
         return f"{type(self).__name__}({', '.join(repr(item) for item in self)})"
 
@@ -46,8 +44,8 @@ def check_layer_is_exhaustive(model: PreTrainedModel, config: Config):
         )
 
 class ParameterGroup(TypedDict):
-    params: list[Parameter]
-    lr: float
+    params: Required[list[Parameter]]
+    lr: Required[float]
 
 def get_optimizer_param_groups(model: PreTrainedModel, config: Config):
     optimizer_config = config.optimizer_config
