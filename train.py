@@ -10,7 +10,7 @@ from transformers import AutoTokenizer, DataCollatorForLanguageModeling, get_sch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.distributed.elastic.multiprocessing.errors import record
-from accelerate import Accelerator, find_executable_batch_size
+from accelerate import Accelerator, find_executable_batch_size, DistributedDataParallelKwargs
 from accelerate.utils import RNG_STATE_NAME
 from tqdm.auto import tqdm
 from argparse import ArgumentParser
@@ -20,7 +20,7 @@ from os import makedirs, listdir, path
 from sys import stdout
 import torch, re, random, numpy
 
-CHECKPOINT_FORMAT = re.compile(r"step_\d+")
+CHECKPOINT_FORMAT = "step_{step}"
 
 # Training function
 def main(config: Config):
@@ -31,11 +31,13 @@ def main(config: Config):
     unfreezing_config = config.unfreezing_config
     layer_config = config.layer_config
     script_config = config.script_config
+    CHECKPOINT_PATTERN = re.compile(CHECKPOINT_FORMAT.format(step=r"(\d+)"))
 
     # Accelerator
     accelerator = Accelerator(
         mixed_precision=training_config.mixed_precision,
-        gradient_accumulation_steps=training_config.gradient_accumulation_steps
+        gradient_accumulation_steps=training_config.gradient_accumulation_steps,
+        kwargs_handlers=[DistributedDataParallelKwargs(find_unused_parameters=True)]
     )
 
     # Prepare for training
@@ -130,14 +132,14 @@ def main(config: Config):
                 (
                 p
                 for p in listdir(script_config.model_dir)
-                    if path.isdir(path.join(script_config.model_dir, p)) and CHECKPOINT_FORMAT.fullmatch(p)
+                    if path.isdir(path.join(script_config.model_dir, p)) and CHECKPOINT_PATTERN.fullmatch(p)
                 ),
-                key = lambda p: int(p.split('_')[1])
+                key = lambda p: int(CHECKPOINT_PATTERN.fullmatch(p)[1])
             )
             checkpoint_dir = path.join(script_config.model_dir, latest_checkpoint)
             accelerator.load_state(checkpoint_dir)
             print_on_main(f"Loaded from checkpoint '{checkpoint_dir}'")
-            step = int(latest_checkpoint.split('_')[1])
+            step = int(CHECKPOINT_PATTERN.fullmatch(latest_checkpoint)[1])
         else:
             step = 0
 
@@ -234,7 +236,7 @@ def main(config: Config):
                         # Save model
                         if save_steps and step % save_steps == 0:
                             accelerator.wait_for_everyone()
-                            checkpoint_dir = path.join(script_config.model_dir, f"step_{step}")
+                            checkpoint_dir = path.join(script_config.model_dir, CHECKPOINT_FORMAT.format(step=step))
                             if accelerator.is_main_process:
                                 accelerator.save_state(checkpoint_dir)
                                 print(f"Saved checkpoint to '{checkpoint_dir}'")
