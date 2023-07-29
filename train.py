@@ -1,5 +1,6 @@
 from script import (
     NewWangchanForMaskedLM,
+    RepreparableAccelerator as Accelerator,
     Config,
     get_layer_params,
     check_layer_is_exhaustive,
@@ -10,8 +11,7 @@ from transformers import AutoTokenizer, DataCollatorForLanguageModeling, get_sch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.distributed.elastic.multiprocessing.errors import record
-from accelerate import Accelerator, find_executable_batch_size, DistributedDataParallelKwargs
-from accelerate.utils import RNG_STATE_NAME
+from accelerate.utils import RNG_STATE_NAME, find_executable_batch_size, release_memory
 from tqdm.auto import tqdm
 from argparse import ArgumentParser
 from typing import Literal
@@ -36,8 +36,7 @@ def main(config: Config):
     # Accelerator
     accelerator = Accelerator(
         mixed_precision=training_config.mixed_precision,
-        gradient_accumulation_steps=training_config.gradient_accumulation_steps,
-        kwargs_handlers=[DistributedDataParallelKwargs(find_unused_parameters=True)]
+        gradient_accumulation_steps=training_config.gradient_accumulation_steps
     )
 
     # Prepare for training
@@ -120,11 +119,16 @@ def main(config: Config):
             num_training_steps=scheduler_config.max_steps
         )
 
+        # Freeze everything
+        if unfreezing_config is not None:
+            for param in model.parameters():
+                param.requires_grad = False
+            print_on_main("Freezed all parameters")
+
         # Prepare for distributed training
         model, optimizer, lr_scheduler, train_dataloader, eval_dataloader = accelerator.prepare(
             model, optimizer, lr_scheduler, train_dataloader, eval_dataloader
         )
-        print_on_main(f"Wrapped model into '{type(model).__name__}'")
 
         # Load from checkpoint
         if script_config.continue_from_checkpoint:
@@ -166,32 +170,36 @@ def main(config: Config):
 
         # Gradual unfreezing
         def get_unfreeze_func():
+            nonlocal model
             if unfreezing_config is None:
                 return lambda _: None
             else:
-                # Freeze everything
-                for param in model.parameters():
-                    param.requires_grad = False
-                print_on_main("Freezed all parameters")
                 # Define unfreezing function
                 layers = layer_config.layers
                 schedule = unfreezing_config.schedule
                 if unfreezing_config.mode == "epoch":
                     schedule = (n * num_update_steps_per_epoch for n in schedule)
                 step_to_layer = dict(zip(schedule, layers))
-                unwrapped_model = accelerator.unwrap_model(model)
-                def unfreeze(step: int):
+                def unfreeze(step: int, reprepare: bool = True):
+                    nonlocal model
                     if step in step_to_layer:
                         layer = step_to_layer[step]
+                        unwrapped_model = accelerator.unwrap_model(model)
                         for param in get_layer_params(unwrapped_model, layer):
                             param.requires_grad = True
                         del step_to_layer[step]
                         print_on_main(f"Unfreezed {layer}")
+                        if reprepare:
+                            model = accelerator.prepare(unwrapped_model)
+                            release_memory()
+                            model.train()
                 # Unfreeze already-unfreezed layers
                 for i in sorted(step_to_layer):
-                    if i < step:
-                        unfreeze(i)
+                    if i <= step:
+                        unfreeze(i, reprepare=False)
                     else:
+                        model = accelerator.prepare(accelerator.unwrap_model(model))
+                        release_memory()
                         break
                 return unfreeze
         unfreeze = get_unfreeze_func()
