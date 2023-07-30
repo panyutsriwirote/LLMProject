@@ -181,7 +181,7 @@ def main(config: Config):
                     nonlocal model
                     if step in step_to_layer:
                         layer = step_to_layer[step]
-                        unwrapped_model = accelerator.unwrap_model(model)
+                        unwrapped_model = accelerator.unwrap_model(model, keep_fp32_wrapper=False)
                         for param in get_layer_params(unwrapped_model, layer):
                             param.requires_grad = True
                         del step_to_layer[step]
@@ -196,7 +196,7 @@ def main(config: Config):
                     if i <= step:
                         unfreeze(i, reprepare=False)
                     else:
-                        model = accelerator.prepare(accelerator.unwrap_model(model))
+                        model = accelerator.prepare(accelerator.unwrap_model(model, keep_fp32_wrapper=False))
                         release_memory()
                         print_on_main(f"{sum(not param.requires_grad for param in model.parameters())} parameters still frozen")
                         break
