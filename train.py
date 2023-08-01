@@ -32,7 +32,7 @@ def main(config: Config):
     unfreezing_config = config.unfreezing_config
     layer_config = config.layer_config
     script_config = config.script_config
-    CHECKPOINT_PATTERN = re.compile(CHECKPOINT_FORMAT.format(step=r"(\d+)"))
+    CHECKPOINT_PATTERN = re.compile(CHECKPOINT_FORMAT.format(step=r"(?P<step>\d+)"))
 
     # Accelerator
     accelerator = Accelerator(
@@ -89,7 +89,6 @@ def main(config: Config):
             return dataset
         train_dataloader = DataLoader(
             dataset=get_dataset(script_config.train_data),
-            shuffle=True,
             batch_size=training_config.batch_size,
             collate_fn=data_collator
         )
@@ -127,20 +126,24 @@ def main(config: Config):
             model, optimizer, lr_scheduler, train_dataloader, eval_dataloader
         )
 
-        # Load from checkpoint
+        # Load checkpoint
+        def load_checkpoint():
+            latest_step = 0
+            latest_checkpoint = None
+            for name in listdir(script_config.model_dir):
+                full_path = path.join(script_config.model_dir, name)
+                if path.isdir(full_path):
+                    match = CHECKPOINT_PATTERN.fullmatch(name)
+                    if match:
+                        step = int(match["step"])
+                        if step > latest_step:
+                            latest_step = step
+                            latest_checkpoint = full_path
+            accelerator.load_state(latest_checkpoint)
+            print_on_main(f"Loaded from checkpoint '{latest_checkpoint}'")
+            return latest_step
         if script_config.continue_from_checkpoint:
-            latest_checkpoint = max(
-                (
-                p
-                for p in listdir(script_config.model_dir)
-                    if path.isdir(path.join(script_config.model_dir, p)) and CHECKPOINT_PATTERN.fullmatch(p)
-                ),
-                key = lambda p: int(CHECKPOINT_PATTERN.fullmatch(p)[1])
-            )
-            checkpoint_dir = path.join(script_config.model_dir, latest_checkpoint)
-            accelerator.load_state(checkpoint_dir)
-            print_on_main(f"Loaded from checkpoint '{checkpoint_dir}'")
-            step = int(CHECKPOINT_PATTERN.fullmatch(latest_checkpoint)[1])
+            step = load_checkpoint()
         else:
             step = 0
 
@@ -217,7 +220,7 @@ def main(config: Config):
             print_on_main(f">>> Step {step} (Epoch {epoch}): Mean Loss: {total_loss / n}")
             model.train()
 
-        # Saving
+        # Save checkpoint
         def save_checkpoint():
             accelerator.wait_for_everyone()
             checkpoint_dir = path.join(script_config.model_dir, CHECKPOINT_FORMAT.format(step=step))
