@@ -1,16 +1,28 @@
 from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
+from accelerate.checkpointing import load_custom_state
+from accelerate.state import PartialState
 from accelerate.utils import (
     is_torch_version,
     convert_outputs_to_fp32,
     has_transformer_engine_layers,
     convert_model,
+    is_deepspeed_available,
     is_fp8_available,
+    is_tpu_available,
+    is_xpu_available,
     DynamoBackend,
-    is_tpu_available
+    MODEL_NAME,
+    OPTIMIZER_NAME,
+    SCHEDULER_NAME,
+    SCALER_NAME,
+    RNG_STATE_NAME
 )
 from types import MethodType
-import torch, inspect
+import torch, inspect, os, numpy, random
+
+if is_deepspeed_available():
+    from accelerate.utils import DeepSpeedSchedulerWrapper
 
 if is_fp8_available():
     import transformer_engine.common.recipe as te_recipe
@@ -22,7 +34,7 @@ if is_tpu_available(check_device=False):
 
 logger = get_logger(__name__)
 
-class RepreparableAccelerator(Accelerator):
+class CustomAccelerator(Accelerator):
 
     def prepare_model(
         self,
@@ -154,10 +166,195 @@ class RepreparableAccelerator(Accelerator):
                 raise ValueError("Using `torch.compile` requires PyTorch 2.0 or higher.")
             model = torch.compile(model, **self.state.dynamo_plugin.to_kwargs())
         new_model_type = type(model)
-        if new_model_type is not old_model_type and self.is_main_process:
+        if self.is_main_process and new_model_type is not old_model_type:
             model_type_name = new_model_type.__name__
             if reprepare:
                 print(f"Reprepared '{model_type_name}'")
             else:
                 print(f"Wrapped model into '{model_type_name}'")
         return model
+
+    def load_state(
+        self,
+        input_dir: str,
+        *,
+        ignore_model_missing=False,
+        ignore_optimizer_missing=False,
+        ignore_scheduler_missing=False,
+        ignore_scaler_missing=False,
+        ignore_rng_state_missing=False,
+        **load_model_func_kwargs
+    ):
+        # Check if folder exists
+        input_dir = os.path.expanduser(input_dir)
+        if not os.path.isdir(input_dir):
+            raise ValueError(f"Tried to find {input_dir} but folder does not exist")
+        logger.info(f"Loading states from {input_dir}")
+
+        # Load the models taking care of FSDP and DeepSpeed nuances
+        models = []
+        for i, model in enumerate(self._models):
+            if self.distributed_type == DistributedType.FSDP:
+                logger.info("Loading FSDP model")
+                self.state.fsdp_plugin.load_model(self, model, input_dir, i)
+                logger.info(f"FSDP Model loaded from input dir {input_dir}")
+            elif self.distributed_type == DistributedType.DEEPSPEED:
+                logger.info("Loading DeepSpeed Model and Optimizer")
+                ckpt_id = f"{MODEL_NAME}" if i == 0 else f"{MODEL_NAME}_{i}"
+                model.load_checkpoint(input_dir, ckpt_id, **load_model_func_kwargs)
+                logger.info(f"DeepSpeed Model and Optimizer loaded from input dir {os.path.join(input_dir, ckpt_id)}")
+            elif self.distributed_type == DistributedType.MEGATRON_LM:
+                logger.info("Loading Megatron-LM Model, Optimizer and Scheduler")
+                model.load_checkpoint(input_dir)
+                logger.info(f"Megatron-LM Model , Optimizer and Scheduler loaded from input dir {input_dir}")
+            else:
+                models.append(model)
+
+        # Load the optimizers taking care of FSDP and DeepSpeed nuances
+        optimizers = []
+        if self.distributed_type == DistributedType.FSDP:
+            for i, opt in enumerate(self._optimizers):
+                logger.info("Loading FSDP Optimizer")
+                self.state.fsdp_plugin.load_optimizer(self, opt, self._models[i], input_dir, i)
+                logger.info(f"FSDP Optimizer loaded from input dir {input_dir}")
+        elif self.distributed_type not in [DistributedType.DEEPSPEED, DistributedType.MEGATRON_LM]:
+            optimizers = self._optimizers
+
+        # Load the lr schedulers taking care of DeepSpeed nuances
+        schedulers = []
+        if self.distributed_type == DistributedType.DEEPSPEED:
+            for i, scheduler in enumerate(self._schedulers):
+                if isinstance(scheduler, DeepSpeedSchedulerWrapper):
+                    continue
+                schedulers.append(scheduler)
+        elif self.distributed_type not in [DistributedType.MEGATRON_LM]:
+            schedulers = self._schedulers
+
+        # Call model loading hooks that might have been registered with
+        # accelerator.register_model_state_hook
+        for hook in self._load_model_state_pre_hook.values():
+            hook(models, input_dir)
+
+        map_location = load_model_func_kwargs.pop("map_location", None)
+        if map_location is None:
+            if self.num_processes > 1 and self.distributed_type == DistributedType.MULTI_GPU:
+                map_location = "on_device"
+            else:
+                map_location = "cpu"
+
+        load_accelerator_state(
+            input_dir,
+            models,
+            optimizers,
+            schedulers,
+            self.state.process_index,
+            self.scaler,
+            map_location,
+            ignore_model_missing=ignore_model_missing,
+            ignore_optimizer_missing=ignore_optimizer_missing,
+            ignore_scheduler_missing=ignore_scheduler_missing,
+            ignore_scaler_missing=ignore_scaler_missing,
+            ignore_rng_state_missing=ignore_rng_state_missing,
+            **load_model_func_kwargs,
+        )
+        custom_checkpoints = [f for f in os.listdir(input_dir) if "custom_checkpoint" in f]
+        if len(custom_checkpoints) != len(self._custom_objects):
+            err = "Warning! Number of found checkpoints does not match the number of registered objects:"
+            err += f"\n\tFound checkpoints: {len(custom_checkpoints)}"
+            err += f"\n\tRegistered objects: {len(self._custom_objects)}\nSkipping."
+            logger.warning(err)
+        else:
+            logger.info(f"Loading in {len(custom_checkpoints)} custom states")
+            for index, obj in enumerate(self._custom_objects):
+                load_custom_state(obj, input_dir, index)
+
+def load_accelerator_state(
+    input_dir,
+    models,
+    optimizers,
+    schedulers,
+    process_index,
+    scaler=None,
+    map_location=None,
+    *,
+    ignore_model_missing,
+    ignore_optimizer_missing,
+    ignore_scheduler_missing,
+    ignore_scaler_missing,
+    ignore_rng_state_missing,
+    **load_model_func_kwargs,
+):
+    if map_location not in [None, "cpu", "on_device"]:
+        raise TypeError(
+            "Unsupported optimizer map location passed, please choose one of `None`, `'cpu'`, or `'on_device'`"
+        )
+    if map_location is None:
+        map_location = "cpu"
+    elif map_location == "on_device":
+        map_location = PartialState().device
+
+    # Model states
+    try:
+        for i, model in enumerate(models):
+            weights_name = f"{MODEL_NAME}.bin" if i == 0 else f"{MODEL_NAME}_{i}.bin"
+            input_model_file = os.path.join(input_dir, weights_name)
+            model.load_state_dict(torch.load(input_model_file, map_location=map_location), **load_model_func_kwargs)
+        logger.info("All model weights loaded successfully")
+    except Exception:
+        logger.info("Could not load model weights")
+        if not ignore_model_missing:
+            raise
+
+    # Optimizer states
+    try:
+        for i, optimizer in enumerate(optimizers):
+            optimizer_name = f"{OPTIMIZER_NAME}.bin" if i == 0 else f"{OPTIMIZER_NAME}_{i}.bin"
+            input_optimizer_file = os.path.join(input_dir, optimizer_name)
+            optimizer_state = torch.load(input_optimizer_file, map_location=map_location)
+            optimizer.load_state_dict(optimizer_state)
+        logger.info("All optimizer states loaded successfully")
+    except Exception:
+        logger.info("Could not load optimizer states")
+        if not ignore_optimizer_missing:
+            raise
+
+    # Scheduler states
+    try:
+        for i, scheduler in enumerate(schedulers):
+            scheduler_name = f"{SCHEDULER_NAME}.bin" if i == 0 else f"{SCHEDULER_NAME}_{i}.bin"
+            input_scheduler_file = os.path.join(input_dir, scheduler_name)
+            scheduler.load_state_dict(torch.load(input_scheduler_file))
+        logger.info("All scheduler states loaded successfully")
+    except Exception:
+        logger.info("Could not load scheduler states")
+        if not ignore_scheduler_missing:
+            raise
+
+    # GradScaler state
+    try:
+        if scaler is not None:
+            input_scaler_file = os.path.join(input_dir, SCALER_NAME)
+            scaler.load_state_dict(torch.load(input_scaler_file))
+            logger.info("GradScaler state loaded successfully")
+    except Exception:
+        logger.info("Could not load GradScaler state")
+        if not ignore_scaler_missing:
+            raise
+
+    # Random states
+    try:
+        states = torch.load(os.path.join(input_dir, f"{RNG_STATE_NAME}_{process_index}.pkl"))
+        random.setstate(states["random_state"])
+        numpy.random.set_state(states["numpy_random_seed"])
+        torch.set_rng_state(states["torch_manual_seed"])
+        if is_xpu_available():
+            torch.xpu.set_rng_state_all(states["torch_xpu_manual_seed"])
+        else:
+            torch.cuda.set_rng_state_all(states["torch_cuda_manual_seed"])
+        if is_tpu_available():
+            xm.set_rng_state(states["xm_seed"])
+        logger.info("All random states loaded successfully")
+    except Exception:
+        logger.info("Could not load random states")
+        if not ignore_rng_state_missing:
+            raise

@@ -1,6 +1,6 @@
 from script import (
     NewWangchanForMaskedLM,
-    RepreparableAccelerator as Accelerator,
+    CustomAccelerator as Accelerator,
     Config,
     get_layer_params,
     check_layer_is_exhaustive,
@@ -232,7 +232,7 @@ def main(config: Config):
                 # Save random state of other processes
                 makedirs(checkpoint_dir, exist_ok=True)
                 states = {}
-                states_name = f"{RNG_STATE_NAME}_{accelerator.state.process_index}.pkl"
+                states_name = f"{RNG_STATE_NAME}_{accelerator.process_index}.pkl"
                 states["random_state"] = random.getstate()
                 states["numpy_random_seed"] = numpy.random.get_state()
                 states["torch_manual_seed"] = torch.get_rng_state()
