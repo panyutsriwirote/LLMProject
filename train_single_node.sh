@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --partition=gpu                    # Partition [compute|memory|gpu]
 #SBATCH --nodes=1                          # Number of nodes
-#SBATCH --ntasks-per-node=4                # Tasks per node
-#SBATCH --cpus-per-task=16                 # CPUs per task
-#SBATCH --gpus-per-task=1                  # GPUs per task
+#SBATCH --ntasks-per-node=1                # Tasks per node
+#SBATCH --cpus-per-task=64                 # CPUs per task
+#SBATCH --gpus-per-task=4                  # GPUs per task
 #SBATCH --time=2-00:00:00                  # Time limit (day-hour:minute:second)
 #SBATCH --account=lt200063                 # Project name
 #SBATCH --job-name=train_single_node       # Job name

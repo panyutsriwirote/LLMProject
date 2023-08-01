@@ -4,8 +4,12 @@ from argparse import Namespace
 from os import path
 import tomllib
 
+class PrettyPrintConfig:
+    def __str__(self):
+        return f"{type(self).__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
+
 @dataclass
-class TrainingConfig:
+class TrainingConfig(PrettyPrintConfig):
     num_epochs: int
     batch_size: int
     eval_steps: Literal["no", "epoch", "once"] | int
@@ -13,35 +17,23 @@ class TrainingConfig:
     gradient_accumulation_steps: int
     mixed_precision: str
 
-    def __str__(self):
-        return f"{type(self).__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
-
 @dataclass
-class OptimizerConfig:
+class OptimizerConfig(PrettyPrintConfig):
     peak_lr: float
     weight_decay: float
     eps: float
     betas: tuple[float, float]
     layer_lr_decay_factor: int | None
 
-    def __str__(self):
-        return f"{type(self).__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
-
 @dataclass
-class SchedulerConfig:
+class SchedulerConfig(PrettyPrintConfig):
     num_warmup_steps: int
     max_steps: int
 
-    def __str__(self):
-        return f"{type(self).__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
-
 @dataclass
-class UnfreezingConfig:
+class UnfreezingConfig(PrettyPrintConfig):
     mode: Literal["epoch", "step"]
     schedule: list[int]
-
-    def __str__(self):
-        return f"{type(self).__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
 
 @dataclass
 class Layer:
@@ -59,15 +51,13 @@ class LayerConfig:
         return f"{type(self).__name__}(\n" + '\n'.join(f"    {layer}" for layer in self.layers) + "\n)"
 
 @dataclass
-class ScriptConfig:
+class ScriptConfig(PrettyPrintConfig):
     model_dir: str | None
     config_file: str
     train_data: str
     eval_data: str
     continue_from_checkpoint: bool
-
-    def __str__(self):
-        return f"{type(self).__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
+    ignore_missing: list[str]
 
 @dataclass
 class Config:
@@ -133,5 +123,10 @@ class Config:
             raise ValueError(
                 f"'save_steps' must be one of 'no', 'epoch', 'once' or an integer. "
                 f"Got {config.training_config.save_steps}"
+            )
+        if not config.script_config.continue_from_checkpoint and config.script_config.ignore_missing:
+            raise ValueError(
+                f"'ignore_missing' can only be used when continuing from a checkpoint. "
+                f"Got {config.script_config.ignore_missing}"
             )
         return config

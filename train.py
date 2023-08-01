@@ -127,22 +127,22 @@ def main(config: Config):
         )
 
         # Load checkpoint
-        def load_checkpoint():
-            latest_step = 0
-            latest_checkpoint = None
-            for name in listdir(script_config.model_dir):
-                full_path = path.join(script_config.model_dir, name)
-                if path.isdir(full_path):
-                    match = CHECKPOINT_PATTERN.fullmatch(name)
-                    if match:
-                        step = int(match["step"])
-                        if step > latest_step:
-                            latest_step = step
-                            latest_checkpoint = full_path
-            accelerator.load_state(latest_checkpoint)
-            print_on_main(f"Loaded from checkpoint '{latest_checkpoint}'")
-            return latest_step
         if script_config.continue_from_checkpoint:
+            def load_checkpoint():
+                latest_step = 0
+                latest_checkpoint = None
+                for name in listdir(script_config.model_dir):
+                    full_path = path.join(script_config.model_dir, name)
+                    if path.isdir(full_path):
+                        match = CHECKPOINT_PATTERN.fullmatch(name)
+                        if match:
+                            step = int(match["step"])
+                            if step > latest_step:
+                                latest_step = step
+                                latest_checkpoint = full_path
+                accelerator.load_state(latest_checkpoint, ignore_missing=script_config.ignore_missing)
+                print_on_main(f"Loaded from checkpoint '{latest_checkpoint}'")
+                return latest_step
             step = load_checkpoint()
         else:
             step = 0
@@ -299,11 +299,12 @@ def main(config: Config):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--model_dir", type=str)
-    parser.add_argument("--train_data", type=str, required=True)
-    parser.add_argument("--eval_data", type=str, required=True)
+    parser.add_argument("--model_dir")
+    parser.add_argument("--train_data", required=True)
+    parser.add_argument("--eval_data", required=True)
     parser.add_argument("--continue_from_checkpoint", action="store_true")
-    parser.add_argument("--config_file", type=str)
+    parser.add_argument("--ignore_missing", nargs='+', choices=("model", "optimizer", "scheduler", "scaler", "rng_state"), default=[])
+    parser.add_argument("--config_file")
     args = parser.parse_args()
     config = Config.from_args(args)
     main(config)

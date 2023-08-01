@@ -19,6 +19,7 @@ from accelerate.utils import (
     RNG_STATE_NAME
 )
 from types import MethodType
+from collections.abc import Container
 import torch, inspect, os, numpy, random
 
 if is_deepspeed_available():
@@ -178,11 +179,7 @@ class CustomAccelerator(Accelerator):
         self,
         input_dir: str,
         *,
-        ignore_model_missing=False,
-        ignore_optimizer_missing=False,
-        ignore_scheduler_missing=False,
-        ignore_scaler_missing=False,
-        ignore_rng_state_missing=False,
+        ignore_missing: Container[str] = (),
         **load_model_func_kwargs
     ):
         # Check if folder exists
@@ -250,11 +247,7 @@ class CustomAccelerator(Accelerator):
             self.state.process_index,
             self.scaler,
             map_location,
-            ignore_model_missing=ignore_model_missing,
-            ignore_optimizer_missing=ignore_optimizer_missing,
-            ignore_scheduler_missing=ignore_scheduler_missing,
-            ignore_scaler_missing=ignore_scaler_missing,
-            ignore_rng_state_missing=ignore_rng_state_missing,
+            ignore_missing=ignore_missing,
             **load_model_func_kwargs,
         )
         custom_checkpoints = [f for f in os.listdir(input_dir) if "custom_checkpoint" in f]
@@ -277,11 +270,7 @@ def load_accelerator_state(
     scaler=None,
     map_location=None,
     *,
-    ignore_model_missing,
-    ignore_optimizer_missing,
-    ignore_scheduler_missing,
-    ignore_scaler_missing,
-    ignore_rng_state_missing,
+    ignore_missing,
     **load_model_func_kwargs,
 ):
     if map_location not in [None, "cpu", "on_device"]:
@@ -302,7 +291,7 @@ def load_accelerator_state(
         logger.info("All model weights loaded successfully")
     except Exception:
         logger.info("Could not load model weights")
-        if not ignore_model_missing:
+        if "model" not in ignore_missing:
             raise
 
     # Optimizer states
@@ -315,7 +304,7 @@ def load_accelerator_state(
         logger.info("All optimizer states loaded successfully")
     except Exception:
         logger.info("Could not load optimizer states")
-        if not ignore_optimizer_missing:
+        if "optimizer" not in ignore_missing:
             raise
 
     # Scheduler states
@@ -327,7 +316,7 @@ def load_accelerator_state(
         logger.info("All scheduler states loaded successfully")
     except Exception:
         logger.info("Could not load scheduler states")
-        if not ignore_scheduler_missing:
+        if "scheduler" not in ignore_missing:
             raise
 
     # GradScaler state
@@ -338,7 +327,7 @@ def load_accelerator_state(
             logger.info("GradScaler state loaded successfully")
     except Exception:
         logger.info("Could not load GradScaler state")
-        if not ignore_scaler_missing:
+        if "scaler" not in ignore_missing:
             raise
 
     # Random states
@@ -356,5 +345,5 @@ def load_accelerator_state(
         logger.info("All random states loaded successfully")
     except Exception:
         logger.info("Could not load random states")
-        if not ignore_rng_state_missing:
+        if "rng_state" not in ignore_missing:
             raise
