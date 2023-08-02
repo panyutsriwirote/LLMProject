@@ -13,7 +13,6 @@ from torch.optim import AdamW
 from torch.distributed.elastic.multiprocessing.errors import record
 from accelerate.utils import RNG_STATE_NAME, release_memory
 from tqdm.auto import tqdm
-from argparse import ArgumentParser
 from typing import Literal
 from shutil import copyfile, SameFileError
 from os import makedirs, listdir, path
@@ -298,13 +297,4 @@ def main(config: Config):
         raise
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("--model_dir")
-    parser.add_argument("--train_data", required=True)
-    parser.add_argument("--eval_data", required=True)
-    parser.add_argument("--continue_from_checkpoint", action="store_true")
-    parser.add_argument("--ignore_missing", nargs='+', choices=("model", "optimizer", "scheduler", "scaler", "rng_state"), default=[])
-    parser.add_argument("--config_file")
-    args = parser.parse_args()
-    config = Config.from_args(args)
-    main(config)
+    main(Config.from_args())
