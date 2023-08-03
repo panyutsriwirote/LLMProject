@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Sequence
 from argparse import ArgumentParser
 from os import path
 import tomllib
@@ -23,7 +23,7 @@ class OptimizerConfig(PrettyPrintConfig):
     weight_decay: float
     eps: float
     betas: tuple[float, float]
-    layer_lr_decay_factor: int | None
+    layer_lr_decay_factor: int | None = None
 
 @dataclass
 class SchedulerConfig(PrettyPrintConfig):
@@ -72,7 +72,7 @@ class Config:
         return '\n'.join(str(v) for v in vars(self).values() if v is not None)
 
     @classmethod
-    def from_args(cls):
+    def from_args(cls, args: Sequence[str] | None = None):
         parser = ArgumentParser()
         parser.add_argument("--model_dir")
         parser.add_argument("--train_data", required=True)
@@ -80,7 +80,7 @@ class Config:
         parser.add_argument("--continue_from_checkpoint", action="store_true")
         parser.add_argument("--ignore_missing", nargs='+', choices=("model", "optimizer", "scheduler", "scaler", "rng_state"), default=[])
         parser.add_argument("--config_file")
-        args = parser.parse_args()
+        args = parser.parse_args(args)
         if args.config_file is None:
             if args.model_dir is None:
                 raise ValueError("Cannot determine config file path. Please specify --model_dir or --config_file")

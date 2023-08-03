@@ -2,6 +2,7 @@ from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.checkpointing import load_custom_state
 from accelerate.state import PartialState
+from accelerate.utils.other import is_compiled_module
 from accelerate.utils import (
     is_torch_version,
     convert_outputs_to_fp32,
@@ -23,6 +24,7 @@ from collections.abc import Container
 import torch, inspect, os, numpy, random
 
 if is_deepspeed_available():
+    from deepspeed import DeepSpeedEngine
     from accelerate.utils import DeepSpeedSchedulerWrapper
 
 if is_fp8_available():
@@ -260,6 +262,38 @@ class CustomAccelerator(Accelerator):
             logger.info(f"Loading in {len(custom_checkpoints)} custom states")
             for index, obj in enumerate(self._custom_objects):
                 load_custom_state(obj, input_dir, index)
+
+    def unwrap_model(self, model, keep_fp32_wrapper: bool = True):
+        options = (torch.nn.parallel.DistributedDataParallel, torch.nn.DataParallel)
+
+        is_compiled = is_compiled_module(model)
+        if is_compiled:
+            compiled_model = model
+            model = model._orig_mod
+
+        if is_deepspeed_available():
+            options += (DeepSpeedEngine,)
+
+        while isinstance(model, options):
+            model = model.module
+
+        if not keep_fp32_wrapper:
+            forward = getattr(model, "forward")
+            original_forward = model.__dict__.pop("_original_forward", None)
+            if original_forward is not None:
+                while hasattr(forward, "__wrapped__"):
+                    forward = forward.__wrapped__
+                    if forward == original_forward:
+                        break
+                model.forward = MethodType(forward, model)
+            if getattr(model, "_converted_to_transformer_engine", False):
+                convert_model(model, to_transformer_engine=False)
+
+        if is_compiled:
+            compiled_model._orig_mod = model
+            model = compiled_model
+
+        return model
 
 def load_accelerator_state(
     input_dir,
