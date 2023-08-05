@@ -136,7 +136,7 @@ def main(config: Config):
                         match = CHECKPOINT_PATTERN.fullmatch(name)
                         if match:
                             step = int(match["step"])
-                            if step > latest_step:
+                            if step >= latest_step:
                                 latest_step = step
                                 latest_checkpoint = full_path
                 accelerator.load_state(latest_checkpoint, ignore_missing=script_config.ignore_missing)
