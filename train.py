@@ -214,8 +214,8 @@ def main(config: Config):
                 with torch.no_grad():
                     loss = model(**batch).loss
                 losses = accelerator.gather_for_metrics(loss.repeat(training_config.batch_size))
-                total_loss += torch.sum(losses)
-                n += len(losses)
+                total_loss += torch.nansum(losses)
+                n += torch.sum(~losses.isnan())
             print_on_main(f">>> Step {step} (Epoch {epoch}): Mean Loss: {total_loss / n}")
             model.train()
 
