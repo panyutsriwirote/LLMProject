@@ -216,6 +216,8 @@ def main(config: Config):
                 losses = accelerator.gather_for_metrics(loss.repeat(training_config.batch_size))
                 total_loss += torch.nansum(losses)
                 n += torch.sum(~losses.isnan())
+            if n == 0:
+                raise RuntimeError(f"Loss of every eval batch is NaN at Step {step} (Epoch {epoch})")
             print_on_main(f">>> Step {step} (Epoch {epoch}): Mean Loss: {total_loss / n}")
             model.train()
 

@@ -1,4 +1,3 @@
 model
-accelerate_src
-torch_src
+*_src
 test.ipynb

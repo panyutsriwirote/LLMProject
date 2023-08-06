@@ -312,7 +312,14 @@ class NewWangchanSelfAttention(Module):
         x = x.view(new_x_shape)
         return x.permute(0, 2, 1, 3)
 
-    def forward(
+    def forward(self, *args, **kwargs):
+        if torch.is_autocast_enabled():
+            with torch.cuda.amp.autocast(enabled=False):
+                return self._forward(*args, **kwargs)
+        else:
+            return self._forward(*args, **kwargs)
+
+    def _forward(
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.FloatTensor | None = None,
