@@ -6,7 +6,7 @@ import tomllib
 
 class PrettyPrintConfig:
     def __str__(self):
-        return f"{type(self).__name__}(\n" + '\n'.join(f"    {k}={repr(v)}" for k, v in vars(self).items()) + "\n)"
+        return f"{type(self).__name__}(\n" + '\n'.join(f"    {k}={v!r}" for k, v in vars(self).items()) + "\n)"
 
 @dataclass
 class TrainingConfig(PrettyPrintConfig):
@@ -27,8 +27,9 @@ class OptimizerConfig(PrettyPrintConfig):
 
 @dataclass
 class SchedulerConfig(PrettyPrintConfig):
-    num_warmup_steps: int
-    max_steps: int
+    type: str
+    num_warmup_steps: int | None = None
+    max_steps: int | None = None
 
 @dataclass
 class UnfreezingConfig(PrettyPrintConfig):
@@ -93,9 +94,7 @@ class Config:
             optimizer_config=OptimizerConfig(**config["optimizer"]),
             scheduler_config=SchedulerConfig(**config["scheduler"]),
             unfreezing_config=UnfreezingConfig(**config["unfreezing"]) if "unfreezing" in config else None,
-            layer_config=LayerConfig(
-                [Layer(**layer) for layer in config["layer"]]
-            ) if "layer" in config else None,
+            layer_config=LayerConfig([Layer(**layer) for layer in config["layer"]]) if "layer" in config else None,
             script_config=script_config
         )
         if (

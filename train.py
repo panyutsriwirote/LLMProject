@@ -108,7 +108,7 @@ def main(config: Config):
 
         # Learning rate scheduler
         lr_scheduler = get_scheduler(
-            "linear",
+            name=scheduler_config.type,
             optimizer=optimizer,
             num_warmup_steps=scheduler_config.num_warmup_steps,
             num_training_steps=scheduler_config.max_steps
