@@ -1,5 +1,6 @@
-from .downstream_datasets import get_downstream_dataset
+from .datasets import get_downstream_dataset
 from typing import Literal
+from os import path
 from transformers import (
     AutoModelForSequenceClassification,
     AutoModelForTokenClassification,
@@ -14,8 +15,8 @@ import evaluate, torch
 
 def f1_metrics(task: Literal["single_label_classification", "multi_label_classification", "token_classification"]):
     f1 = evaluate.load("f1", "multilabel" if task == "multi_label_classification" else None)
-    def compute_metrics(p: EvalPrediction):
-        predictions, label_ids = p
+    def compute_metrics(eval_pred: EvalPrediction):
+        predictions, label_ids = eval_pred
         if task == "single_label_classification":
             predictions = predictions.argmax(axis=1)
         elif task == "multi_label_classification":
@@ -25,15 +26,19 @@ def f1_metrics(task: Literal["single_label_classification", "multi_label_classif
             label_ids = label_ids.flatten()
             predictions = [p for p, l in zip(predictions, label_ids) if l != -100]
             label_ids = [l for l in label_ids if l != -100]
-        micro_f1 = f1.compute(predictions=predictions, references=label_ids, average="micro")["f1"]
-        macro_f1 = f1.compute(predictions=predictions, references=label_ids, average="macro")["f1"]
+        micro_average_f1 = f1.compute(predictions=predictions, references=label_ids, average="micro")["f1"]
+        macro_average_f1 = f1.compute(predictions=predictions, references=label_ids, average="macro")["f1"]
+        weighted_average_f1 = f1.compute(predictions=predictions, references=label_ids, average="weighted")["f1"]
+        class_f1 = f1.compute(predictions=predictions, references=label_ids, average=None)["f1"]
         return {
-            "micro_f1": micro_f1,
-            "macro_f1": macro_f1
+            "micro_average_f1": micro_average_f1,
+            "macro_average_f1": macro_average_f1,
+            "weighted_average_f1": weighted_average_f1,
+            "class_f1": class_f1
         }
     return compute_metrics
 
-DATASET_NAME_TO_TAKS = {
+DATASET_NAME_TO_TASK = {
     "wisesight_sentiment": "single_label_classification",
     "generated_reviews_enth": "single_label_classification",
     "wongnai_reviews": "single_label_classification",
@@ -43,12 +48,12 @@ DATASET_NAME_TO_TAKS = {
     "lst20_ner": "token_classification"
 }
 
-def finetune_on_dataset(name: str, model_dir: str, training_args: TrainingArguments):
+def finetune_on_dataset(name: str, model_dir: str):
     # Get dataset
     tokenizer = AutoTokenizer.from_pretrained("model")
     dataset = get_downstream_dataset(name, tokenizer)
     # Get model
-    task = DATASET_NAME_TO_TAKS[name]
+    task = DATASET_NAME_TO_TASK[name]
     if name in ("wisesight_sentiment", "generated_reviews_enth", "wongnai_reviews"):
         model = AutoModelForSequenceClassification.from_pretrained(
             model_dir,
@@ -86,6 +91,34 @@ def finetune_on_dataset(name: str, model_dir: str, training_args: TrainingArgume
         data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
     else:
         data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    # Training arguments
+    if task == "single_label_classification":
+        metric_for_best_model = "micro_average_f1"
+    elif task == "multi_label_classification":
+        metric_for_best_model = "macro_average_f1"
+    else:
+        metric_for_best_model = "loss"
+    training_args = TrainingArguments(
+        output_dir=path.join("finetuned_models", name),
+        overwrite_output_dir=True,
+        evaluation_strategy="steps",
+        eval_steps=100,
+        save_strategy="steps",
+        save_steps=100,
+        save_total_limit=5,
+        per_device_train_batch_size=32 if task == "token_classification" else 16,
+        per_device_eval_batch_size=32 if task == "token_classification" else 16,
+        learning_rate=3e-5,
+        warmup_ratio=0.1,
+        weight_decay=0.01,
+        adam_beta1=0.9,
+        adam_beta2=0.999,
+        adam_epsilon=1e-8,
+        num_train_epochs=6 if task == "token_classification" else 3,
+        fp16=True,
+        load_best_model_at_end=True,
+        metric_for_best_model=metric_for_best_model
+    )
     # Trainer
     trainer = Trainer(
         model=model,
@@ -97,4 +130,5 @@ def finetune_on_dataset(name: str, model_dir: str, training_args: TrainingArgume
         compute_metrics=f1_metrics(task)
     )
     trainer.train()
-    trainer.evaluate(eval_dataset=dataset["test"])
+    print(trainer.predict(test_dataset=dataset["test"]).metrics)
+    return trainer

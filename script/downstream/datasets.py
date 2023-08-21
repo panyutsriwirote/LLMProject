@@ -1,4 +1,4 @@
-from .preprocess import process_transformers
+from ..preprocess import process_transformers
 from transformers import PreTrainedTokenizer
 from datasets import load_dataset, DatasetDict
 from typing import Any
