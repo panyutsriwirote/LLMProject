@@ -69,7 +69,11 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
             batched=True,
             remove_columns=["translation", "correct"]
         )
-        return dataset.rename_column("review_star", "labels")
+        return dataset.map(
+            lambda examples: {"labels": [label - 1 for label in examples["review_star"]]},
+            batched=True,
+            remove_columns="review_star"
+        )
     elif name == "wongnai_reviews":
         dataset = dataset.map(
             lambda examples: tokenizer(

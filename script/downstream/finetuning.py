@@ -34,7 +34,7 @@ def f1_metrics(task: Literal["single_label_classification", "multi_label_classif
             "micro_average_f1": micro_average_f1,
             "macro_average_f1": macro_average_f1,
             "weighted_average_f1": weighted_average_f1,
-            "class_f1": class_f1
+            "class_f1": list(class_f1)
         }
     return compute_metrics
 
@@ -48,7 +48,7 @@ DATASET_NAME_TO_TASK = {
     "lst20_ner": "token_classification"
 }
 
-def finetune_on_dataset(name: str, model_dir: str):
+def finetune_on_dataset(name: str, model_dir: str, *, per_device_batch_size: int | None = None):
     # Get dataset
     tokenizer = AutoTokenizer.from_pretrained("model")
     dataset = get_downstream_dataset(name, tokenizer)
@@ -106,8 +106,8 @@ def finetune_on_dataset(name: str, model_dir: str):
         save_strategy="steps",
         save_steps=100,
         save_total_limit=5,
-        per_device_train_batch_size=32 if task == "token_classification" else 16,
-        per_device_eval_batch_size=32 if task == "token_classification" else 16,
+        per_device_train_batch_size=per_device_batch_size or (32 if task == "token_classification" else 16),
+        per_device_eval_batch_size=per_device_batch_size or (32 if task == "token_classification" else 16),
         learning_rate=3e-5,
         warmup_ratio=0.1,
         weight_decay=0.01,
@@ -130,5 +130,6 @@ def finetune_on_dataset(name: str, model_dir: str):
         compute_metrics=f1_metrics(task)
     )
     trainer.train()
-    print(trainer.predict(test_dataset=dataset["test"]).metrics)
+    print("**Evaluate on test set**")
+    print('\n'.join(f"{k}: {v}" for k, v in trainer.predict(test_dataset=dataset["test"]).metrics.items()))
     return trainer
