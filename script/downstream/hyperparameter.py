@@ -37,11 +37,6 @@ def hp_search_on_dataset(name: str, model_dir: str):
             problem_type=task,
             num_labels=len(id2label)
         )
-    # Set targets
-    if task == "named_entity_recognition":
-        dataset = dataset.remove_columns("pos_tags").rename_column("ner_tags", "labels")
-    elif task == "token_classification":
-        dataset = dataset.remove_columns("ner_tags").rename_column("pos_tags", "labels")
     # Data collator
     if task in ("named_entity_recognition", "token_classification"):
         data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)

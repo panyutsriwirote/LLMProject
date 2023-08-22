@@ -17,6 +17,14 @@ def get_raw_downstream_dataset(name: str) -> DatasetDict:
             validation=train_and_validation["test"],
             test=unsplit["test"]
         )
+    elif name == "yelp_review_full":
+        unsplit = load_dataset("yelp_review_full", cache_dir="cache")
+        train_and_validation = unsplit["train"].train_test_split(test_size=50000, seed=2020)
+        return DatasetDict(
+            train=train_and_validation["train"],
+            validation=train_and_validation["test"],
+            test=unsplit["test"],
+        )
     elif name == "thainer":
         unsplit = load_dataset("thainer", cache_dir="cache")
         labels: list = unsplit["train"].features["ner_tags"].feature.names
@@ -88,6 +96,18 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
         )
         dataset = dataset.rename_column("star_rating", "labels")
         id2label = dict(enumerate(dataset["train"].features["labels"].names))
+    elif name == "yelp_review_full":
+        dataset = dataset.map(
+            lambda examples: tokenizer(
+                [process_transformers(text) for text in examples["text"]],
+                truncation=True,
+                max_length=MAX_LENGTH
+            ),
+            batched=True,
+            remove_columns="text"
+        )
+        dataset = dataset.rename_column("label", "labels")
+        id2label = dict(enumerate(dataset["train"].features["labels"].names))
     elif name == "prachathai67k":
         dataset = dataset.map(
             lambda examples: tokenizer(
@@ -140,10 +160,10 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
             remove_columns=["clause_tags", "fname", "id", "tokens"]
         )
         if name == "lst20_pos":
-            labels = dataset["train"].features["pos_tags"].feature.names
+            dataset = dataset.remove_columns("ner_tags").rename_column("pos_tags", "labels")
         else:
-            labels = dataset["train"].features["ner_tags"].feature.names
-        id2label = dict(enumerate(labels))
+            dataset = dataset.remove_columns("pos_tags").rename_column("ner_tags", "labels")
+        id2label = dict(enumerate(dataset["train"].features["labels"].feature.names))
     else:
         raise ValueError(f"Invalid downstream dataset name: {name}")
     return dataset, id2label
