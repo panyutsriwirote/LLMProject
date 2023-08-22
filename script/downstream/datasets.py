@@ -1,7 +1,6 @@
 from ..preprocess import process_transformers
 from transformers import PreTrainedTokenizer
 from datasets import load_dataset, DatasetDict
-from typing import Any
 
 MAX_LENGTH = 416
 
@@ -48,6 +47,7 @@ def get_raw_downstream_dataset(name: str) -> DatasetDict:
 
 def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
     dataset = get_raw_downstream_dataset(name)
+    id2label: dict[int, str]
     if name == "wisesight_sentiment":
         dataset = dataset.map(
             lambda examples: tokenizer(
@@ -58,7 +58,8 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
             batched=True,
             remove_columns="texts"
         )
-        return dataset.rename_column("category", "labels")
+        dataset = dataset.rename_column("category", "labels")
+        id2label = dict(enumerate(dataset["train"].features["labels"].names))
     elif name == "generated_reviews_enth":
         dataset = dataset.map(
             lambda examples: tokenizer(
@@ -69,11 +70,12 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
             batched=True,
             remove_columns=["translation", "correct"]
         )
-        return dataset.map(
+        dataset = dataset.map(
             lambda examples: {"labels": [label - 1 for label in examples["review_star"]]},
             batched=True,
             remove_columns="review_star"
         )
+        id2label = {0: "1", 1: "2", 2: "3", 3: "4", 4: "5"}
     elif name == "wongnai_reviews":
         dataset = dataset.map(
             lambda examples: tokenizer(
@@ -84,7 +86,8 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
             batched=True,
             remove_columns="review_body"
         )
-        return dataset.rename_column("star_rating", "labels")
+        dataset = dataset.rename_column("star_rating", "labels")
+        id2label = dict(enumerate(dataset["train"].features["labels"].names))
     elif name == "prachathai67k":
         dataset = dataset.map(
             lambda examples: tokenizer(
@@ -95,58 +98,57 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
             batched=True,
             remove_columns=["url", "date", "title", "body_text"]
         )
-        return dataset.map(
+        tags = [
+            "politics",
+            "human_rights",
+            "quality_of_life",
+            "international",
+            "social",
+            "environment",
+            "economics",
+            "culture",
+            "labor",
+            "national_security",
+            "ict",
+            "education"
+        ]
+        dataset = dataset.map(
             lambda examples: {
                 "labels": [
                     list(map(float, label))
-                    for label in zip(
-                        examples["politics"],
-                        examples["human_rights"],
-                        examples["quality_of_life"],
-                        examples["international"],
-                        examples["social"],
-                        examples["environment"],
-                        examples["economics"],
-                        examples["culture"],
-                        examples["labor"],
-                        examples["national_security"],
-                        examples["ict"],
-                        examples["education"]
-                    )
+                    for label in zip(*(examples[tag] for tag in tags))
                 ]
             },
             batched=True,
-            remove_columns=[
-                "politics",
-                "human_rights",
-                "quality_of_life",
-                "international",
-                "social",
-                "environment",
-                "economics",
-                "culture",
-                "labor",
-                "national_security",
-                "ict",
-                "education"
-            ]
+            remove_columns=tags
         )
+        id2label = dict(enumerate(tags))
     elif name == "thainer":
-        return dataset.map(
+        dataset = dataset.map(
             lambda examples: tokenize_and_align_labels(examples, tokenizer),
             batched=True,
             remove_columns=["id", "tokens"]
         )
+        labels: list = dataset["train"].features["ner_tags"].feature.names
+        labels.remove("B-ไม่ยืนยัน")
+        labels.remove("I-ไม่ยืนยัน")
+        id2label = dict(enumerate(labels))
     elif name in ("lst20_pos", "lst20_ner"):
-        return dataset.map(
+        dataset = dataset.map(
             lambda examples: tokenize_and_align_labels(examples, tokenizer),
             batched=True,
             remove_columns=["clause_tags", "fname", "id", "tokens"]
         )
+        if name == "lst20_pos":
+            labels = dataset["train"].features["pos_tags"].feature.names
+        else:
+            labels = dataset["train"].features["ner_tags"].feature.names
+        id2label = dict(enumerate(labels))
     else:
         raise ValueError(f"Invalid downstream dataset name: {name}")
+    return dataset, id2label
 
-def tokenize_and_align_labels(examples: dict[str, Any], tokenizer: PreTrainedTokenizer):
+def tokenize_and_align_labels(examples: dict[str], tokenizer: PreTrainedTokenizer):
     tokenized_inputs = tokenizer(
         [
             [process_transformers(token) for token in tokens]
