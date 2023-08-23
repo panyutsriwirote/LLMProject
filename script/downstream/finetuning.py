@@ -191,7 +191,10 @@ def finetune_on_dataset(
         data_collator=data_collator,
         compute_metrics=f1_metrics(task, id2label)
     )
-    trainer.train()
+    try:
+        trainer.train()
+    except KeyboardInterrupt:
+        pass
     print("**Evaluate on test set**")
     print('\n'.join(f"{k}: {v}" for k, v in trainer.predict(test_dataset=dataset["test"]).metrics.items()))
     return trainer
