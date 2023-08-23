@@ -11,7 +11,9 @@ from transformers import (
     Trainer,
     DataCollatorWithPadding,
     DataCollatorForTokenClassification,
-    EvalPrediction
+    EvalPrediction,
+    TrainerCallback,
+    IntervalStrategy
 )
 import torch
 
@@ -113,6 +115,17 @@ def f1_metrics(
         return postprocess(result)
     return compute_metrics
 
+class SaveOnTrainEnd(TrainerCallback):
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if (
+            args.save_strategy == IntervalStrategy.STEPS
+            and state.save_steps > 0
+            and state.global_step % state.save_steps != 0
+        ):
+            control.should_save = True
+        return control
+
 DATASET_NAME_TO_TASK: dict[str, Task] = {
     "wisesight_sentiment": "single_label_classification",
     "generated_reviews_enth": "single_label_classification",
@@ -189,7 +202,8 @@ def finetune_on_dataset(
         eval_dataset=dataset["validation"],
         tokenizer=tokenizer,
         data_collator=data_collator,
-        compute_metrics=f1_metrics(task, id2label)
+        compute_metrics=f1_metrics(task, id2label),
+        callbacks=[SaveOnTrainEnd]
     )
     try:
         trainer.train()
