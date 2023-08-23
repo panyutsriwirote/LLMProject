@@ -149,7 +149,8 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
             batched=True,
             remove_columns=["id", "tokens"]
         )
-        labels: list = dataset["train"].features["ner_tags"].feature.names
+        dataset = dataset.remove_columns("pos_tags").rename_column("ner_tags", "labels")
+        labels: list = dataset["train"].features["labels"].feature.names
         labels.remove("B-ไม่ยืนยัน")
         labels.remove("I-ไม่ยืนยัน")
         id2label = dict(enumerate(labels))
@@ -161,11 +162,13 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
         )
         if name == "lst20_pos":
             dataset = dataset.remove_columns("ner_tags").rename_column("pos_tags", "labels")
+            id2label = dict(enumerate(dataset["train"].features["labels"].feature.names))
         else:
             dataset = dataset.remove_columns("pos_tags").rename_column("ner_tags", "labels")
-        id2label = dict(enumerate(dataset["train"].features["labels"].feature.names))
+            id2label = {i: label.replace('_', '-') for i, label in enumerate(dataset["train"].features["labels"].feature.names)}
     else:
         raise ValueError(f"Invalid downstream dataset name: {name}")
+    dataset.name = name
     return dataset, id2label
 
 def tokenize_and_align_labels(examples: dict[str], tokenizer: PreTrainedTokenizer):

@@ -28,8 +28,7 @@ def hp_search_on_dataset(
     tokenizer: PreTrainedTokenizer
 ):
     # Get model
-    dataset_name = dataset["train"].info.dataset_name
-    task = DATASET_NAME_TO_TASK[dataset_name]
+    task = DATASET_NAME_TO_TASK[dataset.name]
     if task in ("named_entity_recognition", "token_classification"):
         model_init = lambda _: AutoModelForTokenClassification.from_pretrained(
             model_dir,
@@ -54,12 +53,12 @@ def hp_search_on_dataset(
     else:
         metric_for_best_model = "eval_loss"
     training_args = TrainingArguments(
-        output_dir=path.join("hp_search", dataset_name),
+        output_dir=path.join("hp_search", dataset.name),
         overwrite_output_dir=True,
         evaluation_strategy="steps",
-        eval_steps=100,
+        eval_steps=20 if dataset.name == "thainer" else 100,
         save_strategy="steps",
-        save_steps=100,
+        save_steps=20 if dataset.name == "thainer" else 100,
         save_total_limit=5,
         per_device_train_batch_size=32 if task in ("named_entity_recognition", "token_classification") else 16,
         per_device_eval_batch_size=32 if task in ("named_entity_recognition", "token_classification") else 16,

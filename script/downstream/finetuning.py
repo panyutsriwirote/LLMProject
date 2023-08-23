@@ -37,7 +37,20 @@ def f1_metrics(
             torch.nn.Sigmoid()(torch.tensor(eval_pred.predictions)) > 0.5,
             eval_pred.label_ids
         )
-    elif task in ("token_classification", "named_entity_recognition"):
+    elif task == "named_entity_recognition":
+        def preprocess(eval_pred: EvalPrediction):
+            predictions = eval_pred.predictions.argmax(axis=2)
+            labels = eval_pred.label_ids
+            predictions = [
+                [id2label[p] for p, l in zip(p_row, l_row) if l != -100]
+                for p_row, l_row in zip(predictions, labels)
+            ]
+            labels = [
+                [id2label[l] for l in l_row if l != -100]
+                for l_row in labels
+            ]
+            return predictions, labels
+    elif task == "token_classification":
         def preprocess(eval_pred: EvalPrediction):
             predictions = eval_pred.predictions.argmax(axis=2).flatten()
             labels = eval_pred.label_ids.flatten()
@@ -52,14 +65,25 @@ def f1_metrics(
     else:
         metric = sklearn_metric
     # Function that converts result to Huggingface's format
-    if task in ("single_label_classification", "token_classification"):
+    if task == "single_label_classification":
         postprocess = lambda result: {
             "micro_average_f1": result["accuracy"],
             "macro_average_f1": result["macro avg"]["f1-score"],
             "class_f1": {
-                id2label[i]: result[i]["f1-score"]
+                id2label[int(i)]: result[i]["f1-score"]
                 for i in result
                     if i.isdigit()
+            }
+        }
+    elif task == "token_classification":
+        tag_set = set(id2label.values())
+        postprocess = lambda result: {
+            "micro_average_f1": result["accuracy"],
+            "macro_average_f1": result["macro avg"]["f1-score"],
+            "class_f1": {
+                tag: result[tag]["f1-score"]
+                for tag in result
+                    if tag in tag_set
             }
         }
     elif task == "named_entity_recognition":
@@ -78,7 +102,7 @@ def f1_metrics(
             "micro_average_f1": result["micro avg"]["f1-score"],
             "macro_average_f1": result["macro avg"]["f1-score"],
             "class_f1": {
-                id2label[i]: result[i]["f1-score"]
+                id2label[int(i)]: result[i]["f1-score"]
                 for i in result
                     if i.isdigit()
             }
@@ -109,8 +133,7 @@ def finetune_on_dataset(
     override_default: dict[str] | None = None
 ):
     # Get model
-    dataset_name = dataset["train"].info.dataset_name
-    task = DATASET_NAME_TO_TASK[dataset_name]
+    task = DATASET_NAME_TO_TASK[dataset.name]
     if task in ("named_entity_recognition", "token_classification"):
         model = AutoModelForTokenClassification.from_pretrained(
             model_dir,
@@ -135,12 +158,12 @@ def finetune_on_dataset(
     else:
         metric_for_best_model = "eval_loss"
     args = dict(
-        output_dir=path.join("finetuned_models", dataset_name),
+        output_dir=path.join("finetuned_models", dataset.name),
         overwrite_output_dir=True,
         evaluation_strategy="steps",
-        eval_steps=100,
+        eval_steps=20 if dataset.name == "thainer" else 100,
         save_strategy="steps",
-        save_steps=100,
+        save_steps=20 if dataset.name == "thainer" else 100,
         save_total_limit=5,
         per_device_train_batch_size=32 if task in ("named_entity_recognition", "token_classification") else 16,
         per_device_eval_batch_size=32 if task in ("named_entity_recognition", "token_classification") else 16,
