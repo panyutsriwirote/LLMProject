@@ -1,12 +1,12 @@
-from .datasets import get_downstream_dataset
 from typing import Literal
 from os import path
+from datasets import DatasetDict
 from seqeval.metrics import classification_report as seqeval_metric
 from sklearn.metrics import classification_report as sklearn_metric
 from transformers import (
     AutoModelForSequenceClassification,
     AutoModelForTokenClassification,
-    AutoTokenizer,
+    PreTrainedTokenizer,
     TrainingArguments,
     Trainer,
     DataCollatorWithPadding,
@@ -100,12 +100,17 @@ DATASET_NAME_TO_TASK: dict[str, Task] = {
     "lst20_ner": "named_entity_recognition"
 }
 
-def finetune_on_dataset(name: str, model_dir: str, override_default: dict[str] | None = None):
-    # Get dataset
-    tokenizer = AutoTokenizer.from_pretrained("model")
-    dataset, id2label = get_downstream_dataset(name, tokenizer)
+def finetune_on_dataset(
+    *,
+    dataset: DatasetDict,
+    id2label: dict[int, str],
+    model_dir: str,
+    tokenizer: PreTrainedTokenizer,
+    override_default: dict[str] | None = None
+):
     # Get model
-    task = DATASET_NAME_TO_TASK[name]
+    dataset_name = dataset["train"].info.dataset_name
+    task = DATASET_NAME_TO_TASK[dataset_name]
     if task in ("named_entity_recognition", "token_classification"):
         model = AutoModelForTokenClassification.from_pretrained(
             model_dir,
@@ -130,7 +135,7 @@ def finetune_on_dataset(name: str, model_dir: str, override_default: dict[str] |
     else:
         metric_for_best_model = "eval_loss"
     args = dict(
-        output_dir=path.join("finetuned_models", name),
+        output_dir=path.join("finetuned_models", dataset_name),
         overwrite_output_dir=True,
         evaluation_strategy="steps",
         eval_steps=100,

@@ -19,13 +19,13 @@ def get_params(model: PreTrainedModel, name: str):
 T = TypeVar('T', bound=Hashable)
 class OrderedSet(Set[T]):
     def __init__(self, iterable: Iterable[T]):
-        self._dict = dict.fromkeys(iterable)
+        self.__dict = dict.fromkeys(iterable)
     def __contains__(self, item):
-        return item in self._dict
+        return item in self.__dict
     def __iter__(self):
-        return iter(self._dict)
+        return iter(self.__dict)
     def __len__(self):
-        return len(self._dict)
+        return len(self.__dict)
     def __repr__(self):
         return f"{type(self).__name__}({', '.join(repr(item) for item in self)})"
 

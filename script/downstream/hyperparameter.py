@@ -1,11 +1,11 @@
-from .datasets import get_downstream_dataset
 from .finetuning import DATASET_NAME_TO_TASK, f1_metrics
+from datasets import DatasetDict
 from optuna import Trial
 from os import path
 from transformers import (
     AutoModelForSequenceClassification,
     AutoModelForTokenClassification,
-    AutoTokenizer,
+    PreTrainedTokenizer,
     TrainingArguments,
     Trainer,
     DataCollatorWithPadding,
@@ -20,12 +20,16 @@ def hp_space(trial: Trial):
         "per_device_train_batch_size": trial.suggest_categorical("per_device_train_batch_size", [4, 8, 16, 32, 64])
     }
 
-def hp_search_on_dataset(name: str, model_dir: str):
-    # Get dataset
-    tokenizer = AutoTokenizer.from_pretrained("model")
-    dataset, id2label = get_downstream_dataset(name, tokenizer)
+def hp_search_on_dataset(
+    *,
+    dataset: DatasetDict,
+    id2label: dict[int, str],
+    model_dir: str,
+    tokenizer: PreTrainedTokenizer
+):
     # Get model
-    task = DATASET_NAME_TO_TASK[name]
+    dataset_name = dataset["train"].info.dataset_name
+    task = DATASET_NAME_TO_TASK[dataset_name]
     if task in ("named_entity_recognition", "token_classification"):
         model_init = lambda _: AutoModelForTokenClassification.from_pretrained(
             model_dir,
@@ -50,7 +54,7 @@ def hp_search_on_dataset(name: str, model_dir: str):
     else:
         metric_for_best_model = "eval_loss"
     training_args = TrainingArguments(
-        output_dir=path.join("hp_search", name),
+        output_dir=path.join("hp_search", dataset_name),
         overwrite_output_dir=True,
         evaluation_strategy="steps",
         eval_steps=100,
