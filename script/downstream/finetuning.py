@@ -115,15 +115,25 @@ def f1_metrics(
         return postprocess(result)
     return compute_metrics
 
-class SaveOnTrainEnd(TrainerCallback):
+class OnTrainEnd(TrainerCallback):
 
     def on_train_end(self, args, state, control, **kwargs):
+        # Evaluate
+        if (
+            args.evaluation_strategy == IntervalStrategy.STEPS
+            and state.global_step % state.eval_steps != 0
+            and args.eval_delay <= state.global_step
+        ):
+            control.should_evaluate = True
+
+        # Save
         if (
             args.save_strategy == IntervalStrategy.STEPS
             and state.save_steps > 0
             and state.global_step % state.save_steps != 0
         ):
             control.should_save = True
+
         return control
 
 DATASET_NAME_TO_TASK: dict[str, Task] = {
@@ -203,7 +213,7 @@ def finetune_on_dataset(
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=f1_metrics(task, id2label),
-        callbacks=[SaveOnTrainEnd]
+        callbacks=[OnTrainEnd]
     )
     try:
         trainer.train()
