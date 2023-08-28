@@ -50,6 +50,14 @@ def get_raw_downstream_dataset(name: str) -> DatasetDict:
             validation=validation_and_test["train"],
             test=validation_and_test["test"]
         )
+    elif name == "thai_nner":
+        unsplit = load_dataset("thai_nner", data_dir="ThaiNNER_Corpus", cache_dir="cache")
+        train_and_validation = unsplit["train"].train_test_split(test_size=len(unsplit["test"]), seed=2020)
+        return DatasetDict(
+            train=train_and_validation["train"],
+            validation=train_and_validation["test"],
+            test=unsplit["test"]
+        )
     else:
         raise ValueError(f"Invalid downstream dataset name: {name}")
 
@@ -145,7 +153,7 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
         id2label = dict(enumerate(tags))
     elif name == "thainer":
         dataset = dataset.map(
-            lambda examples: tokenize_and_align_labels(examples, tokenizer),
+            lambda examples: tokenize_and_align_labels(examples, tokenizer, ["ner_tags", "pos_tags"]),
             batched=True,
             remove_columns=["id", "tokens"]
         )
@@ -156,7 +164,7 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
         id2label = dict(enumerate(labels))
     elif name in ("lst20_pos", "lst20_ner"):
         dataset = dataset.map(
-            lambda examples: tokenize_and_align_labels(examples, tokenizer),
+            lambda examples: tokenize_and_align_labels(examples, tokenizer, ["ner_tags", "pos_tags"]),
             batched=True,
             remove_columns=["clause_tags", "fname", "id", "tokens"]
         )
@@ -166,12 +174,28 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
         else:
             dataset = dataset.remove_columns("pos_tags").rename_column("ner_tags", "labels")
             id2label = {i: label.replace('_', '-') for i, label in enumerate(dataset["train"].features["labels"].feature.names)}
+    elif name.startswith("thai_nner_layer_"):
+        possible_layers = [f"layer_{i}" for i in range(1, 9)]
+        dataset = dataset.map(
+            lambda examples: tokenize_and_align_labels(examples, tokenizer, possible_layers),
+            batched=True,
+            remove_columns="tokens"
+        )
+        target_layer = name.lstrip("thai_nner_")
+        dataset = dataset.remove_columns(
+            [layer for layer in possible_layers if layer != target_layer]
+        ).rename_column(target_layer, "labels")
+        id2label = dict(enumerate(dataset["train"].features["labels"].feature.names))
     else:
         raise ValueError(f"Invalid downstream dataset name: {name}")
     dataset.name = name
     return dataset, id2label
 
-def tokenize_and_align_labels(examples: dict[str], tokenizer: PreTrainedTokenizer):
+def tokenize_and_align_labels(
+    examples: dict[str],
+    tokenizer: PreTrainedTokenizer,
+    tags_to_align: list[str]
+):
     tokenized_inputs = tokenizer(
         [
             [process_transformers(token) for token in tokens]
@@ -181,7 +205,7 @@ def tokenize_and_align_labels(examples: dict[str], tokenizer: PreTrainedTokenize
         truncation=True,
         max_length=MAX_LENGTH
     )
-    for tag in ("ner_tags", "pos_tags"):
+    for tag in tags_to_align:
         labels = []
         for i, label in enumerate(examples[tag]):
             word_ids = tokenized_inputs.word_ids(batch_index=i)  # Map tokens to their respective word.

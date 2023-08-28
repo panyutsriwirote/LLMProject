@@ -144,7 +144,15 @@ DATASET_NAME_TO_TASK: dict[str, Task] = {
     "prachathai67k": "multi_label_classification",
     "thainer": "named_entity_recognition",
     "lst20_pos": "token_classification",
-    "lst20_ner": "named_entity_recognition"
+    "lst20_ner": "named_entity_recognition",
+    "thai_nner_layer_1": "named_entity_recognition",
+    "thai_nner_layer_2": "named_entity_recognition",
+    "thai_nner_layer_3": "named_entity_recognition",
+    "thai_nner_layer_4": "named_entity_recognition",
+    "thai_nner_layer_5": "named_entity_recognition",
+    "thai_nner_layer_6": "named_entity_recognition",
+    "thai_nner_layer_7": "named_entity_recognition",
+    "thai_nner_layer_8": "named_entity_recognition"
 }
 
 def finetune_on_dataset(
