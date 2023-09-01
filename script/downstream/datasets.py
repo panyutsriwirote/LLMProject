@@ -50,7 +50,7 @@ def get_raw_downstream_dataset(name: str) -> DatasetDict:
             validation=validation_and_test["train"],
             test=validation_and_test["test"]
         )
-    elif name == "thai_nner":
+    elif name.startswith("thai_nner_layer_"):
         unsplit = load_dataset("thai_nner", data_dir="ThaiNNER_Corpus", cache_dir="cache")
         train_and_validation = unsplit["train"].train_test_split(test_size=len(unsplit["test"]), seed=2020)
         return DatasetDict(
@@ -203,11 +203,12 @@ def tokenize_and_align_labels(
         ],
         is_split_into_words=True,
         truncation=True,
-        max_length=MAX_LENGTH
+        max_length=MAX_LENGTH,
+        return_overflowing_tokens=True
     )
     for tag in tags_to_align:
         labels = []
-        for i, label in enumerate(examples[tag]):
+        for i, sample_id in enumerate(tokenized_inputs["overflow_to_sample_mapping"]):
             word_ids = tokenized_inputs.word_ids(batch_index=i)  # Map tokens to their respective word.
             previous_word_idx = None
             label_ids = []
@@ -215,10 +216,11 @@ def tokenize_and_align_labels(
                 if word_idx is None:
                     label_ids.append(-100)
                 elif word_idx != previous_word_idx:  # Only label the first token of a given word.
-                    label_ids.append(label[word_idx])
+                    label_ids.append(examples[tag][sample_id][word_idx])
                 else:
                     label_ids.append(-100)
                 previous_word_idx = word_idx
             labels.append(label_ids)
         tokenized_inputs[tag] = labels
+    del tokenized_inputs["overflow_to_sample_mapping"]
     return tokenized_inputs

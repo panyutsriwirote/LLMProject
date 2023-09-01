@@ -115,27 +115,6 @@ def f1_metrics(
         return postprocess(result)
     return compute_metrics
 
-class OnTrainEnd(TrainerCallback):
-
-    def on_train_end(self, args, state, control, **kwargs):
-        # Evaluate
-        if (
-            args.evaluation_strategy == IntervalStrategy.STEPS
-            and state.global_step % state.eval_steps != 0
-            and args.eval_delay <= state.global_step
-        ):
-            control.should_evaluate = True
-
-        # Save
-        if (
-            args.save_strategy == IntervalStrategy.STEPS
-            and state.save_steps > 0
-            and state.global_step % state.save_steps != 0
-        ):
-            control.should_save = True
-
-        return control
-
 DATASET_NAME_TO_TASK: dict[str, Task] = {
     "wisesight_sentiment": "single_label_classification",
     "generated_reviews_enth": "single_label_classification",
@@ -188,13 +167,17 @@ def finetune_on_dataset(
         metric_for_best_model = "eval_macro_average_f1"
     else:
         metric_for_best_model = "eval_loss"
+    if dataset.name == "thainer" or dataset.name.startswith("thai_nner_layer_"):
+        steps = 20
+    else:
+        steps = 100
     args = dict(
         output_dir=path.join("finetuned_models", dataset.name),
         overwrite_output_dir=True,
         evaluation_strategy="steps",
-        eval_steps=20 if dataset.name == "thainer" else 100,
+        eval_steps=steps,
         save_strategy="steps",
-        save_steps=20 if dataset.name == "thainer" else 100,
+        save_steps=steps,
         save_total_limit=5,
         per_device_train_batch_size=32 if task in ("named_entity_recognition", "token_classification") else 16,
         per_device_eval_batch_size=32 if task in ("named_entity_recognition", "token_classification") else 16,
@@ -220,8 +203,7 @@ def finetune_on_dataset(
         eval_dataset=dataset["validation"],
         tokenizer=tokenizer,
         data_collator=data_collator,
-        compute_metrics=f1_metrics(task, id2label),
-        callbacks=[OnTrainEnd]
+        compute_metrics=f1_metrics(task, id2label)
     )
     try:
         trainer.train()
