@@ -52,13 +52,17 @@ def hp_search_on_dataset(
         metric_for_best_model = "eval_macro_average_f1"
     else:
         metric_for_best_model = "eval_loss"
+    if dataset.name == "thainer" or dataset.name.startswith("thai_nner_layer_"):
+        steps = 20
+    else:
+        steps = 100
     training_args = TrainingArguments(
         output_dir=path.join("hp_search", dataset.name),
         overwrite_output_dir=True,
         evaluation_strategy="steps",
-        eval_steps=20 if dataset.name == "thainer" else 100,
+        eval_steps=steps,
         save_strategy="steps",
-        save_steps=20 if dataset.name == "thainer" else 100,
+        save_steps=steps,
         save_total_limit=5,
         per_device_train_batch_size=32 if task in ("named_entity_recognition", "token_classification") else 16,
         per_device_eval_batch_size=32 if task in ("named_entity_recognition", "token_classification") else 16,

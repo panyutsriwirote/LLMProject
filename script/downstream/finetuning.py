@@ -11,9 +11,7 @@ from transformers import (
     Trainer,
     DataCollatorWithPadding,
     DataCollatorForTokenClassification,
-    EvalPrediction,
-    TrainerCallback,
-    IntervalStrategy
+    EvalPrediction
 )
 import torch
 

@@ -153,6 +153,10 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
         id2label = dict(enumerate(tags))
     elif name == "thainer":
         dataset = dataset.map(
+            lambda examples: {"tokens": [['<_>' if token == ' ' else token for token in tokens] for tokens in examples["tokens"]]},
+            batched=True
+        )
+        dataset = dataset.map(
             lambda examples: tokenize_and_align_labels(examples, tokenizer, ["ner_tags", "pos_tags"]),
             batched=True,
             remove_columns=["id", "tokens"]
