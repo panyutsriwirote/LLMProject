@@ -164,7 +164,7 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
         id2label = dict(enumerate(labels))
     elif name in ("lst20_pos", "lst20_ner"):
         dataset = dataset.map(
-            lambda examples: {"tokens": [[' ' if token == '_' else token for token in tokens] for tokens in examples["tokens"]]},
+            lambda examples: {"tokens": [['<_>' if token == '_' else token for token in tokens] for tokens in examples["tokens"]]},
             batched=True
         )
         dataset = dataset.map(
@@ -180,7 +180,7 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
             id2label = {i: label.replace('_', '-') for i, label in enumerate(dataset["train"].features["labels"].feature.names)}
     elif name.startswith("thai_nner_layer_"):
         dataset = dataset.map(
-            lambda examples: {"tokens": [[' ' if token == '_' else token for token in tokens] for tokens in examples["tokens"]]},
+            lambda examples: {"tokens": [['<_>' if token == '_' else token for token in tokens] for tokens in examples["tokens"]]},
             batched=True
         )
         possible_layers = [f"layer_{i}" for i in range(1, 9)]
