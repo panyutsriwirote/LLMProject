@@ -164,6 +164,10 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
         id2label = dict(enumerate(labels))
     elif name in ("lst20_pos", "lst20_ner"):
         dataset = dataset.map(
+            lambda examples: {"tokens": [[' ' if token == '_' else token for token in tokens] for tokens in examples["tokens"]]},
+            batched=True
+        )
+        dataset = dataset.map(
             lambda examples: tokenize_and_align_labels(examples, tokenizer, ["ner_tags", "pos_tags"]),
             batched=True,
             remove_columns=["clause_tags", "fname", "id", "tokens"]
@@ -175,6 +179,10 @@ def get_downstream_dataset(name: str, tokenizer: PreTrainedTokenizer):
             dataset = dataset.remove_columns("pos_tags").rename_column("ner_tags", "labels")
             id2label = {i: label.replace('_', '-') for i, label in enumerate(dataset["train"].features["labels"].feature.names)}
     elif name.startswith("thai_nner_layer_"):
+        dataset = dataset.map(
+            lambda examples: {"tokens": [[' ' if token == '_' else token for token in tokens] for tokens in examples["tokens"]]},
+            batched=True
+        )
         possible_layers = [f"layer_{i}" for i in range(1, 9)]
         dataset = dataset.map(
             lambda examples: tokenize_and_align_labels(examples, tokenizer, possible_layers),
