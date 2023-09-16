@@ -13,11 +13,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch CamemBERT model."""
 
-import math
+"""PyTorch PadThaiBERTa model."""
 
-import torch
+import math, torch
 from torch.utils.checkpoint import checkpoint
 from torch.nn.functional import softmax, pad
 from torch.nn import (
@@ -31,7 +30,6 @@ from torch.nn import (
     Parameter,
     CrossEntropyLoss
 )
-
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_utils import PretrainedConfig
 from transformers.models.camembert.modeling_camembert import CamembertForMaskedLM
@@ -51,17 +49,9 @@ from transformers.pytorch_utils import (
 
 logger = get_logger(__name__)
 
-def print_model_size(model: Module):
-    size = sum(
-        param.nelement() * param.element_size() for param in model.parameters()
-    ) + sum(
-        buffer.nelement() * buffer.element_size() for buffer in model.buffers()
-    )
-    print(f'model size: {size / (1024**2):.3f}MB')
+class PadThaiConfig(PretrainedConfig):
 
-class NewWangchanConfig(PretrainedConfig):
-
-    model_type = "new_wangchan"
+    model_type = "pad_thai"
 
     def __init__(
         self,
@@ -161,14 +151,10 @@ class NewWangchanConfig(PretrainedConfig):
             classifier_dropout=self.classifier_dropout,
         )
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertEmbeddings with Camembert->NewWangchan
-class NewWangchanEmbeddings(Module):
-    """
-    Same as BertEmbeddings with a tiny tweak for positional embeddings indexing.
-    """
+# Copied from transformers.models.camembert.modeling_camembert.CamembertEmbeddings with Camembert->PadThai
+class PadThaiEmbeddings(Module):
 
-    # Copied from transformers.models.bert.modeling_bert.BertEmbeddings.__init__
-    def __init__(self, config: NewWangchanConfig):
+    def __init__(self, config: PadThaiConfig):
         super().__init__()
         self.num_old_embeddings = config.old_vocab_size
         self.embedding_dim = config.hidden_size
@@ -187,7 +173,6 @@ class NewWangchanEmbeddings(Module):
         self.register_buffer(
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
         )
-
         # End copy
         self.padding_idx = config.pad_token_id
         self.position_embeddings = Embedding(
@@ -279,9 +264,9 @@ class NewWangchanEmbeddings(Module):
         return incremental_indices.long() + self.padding_idx
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertSelfAttention with Camembert->NewWangchan
-class NewWangchanSelfAttention(Module):
-    def __init__(self, config: NewWangchanConfig, position_embedding_type=None):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertSelfAttention with Camembert->PadThai
+class PadThaiSelfAttention(Module):
+    def __init__(self, config: PadThaiConfig, position_embedding_type=None):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
             raise ValueError(
@@ -314,6 +299,7 @@ class NewWangchanSelfAttention(Module):
 
     def forward(self, *args, **kwargs):
         if torch.is_autocast_enabled():
+            # This temporarily disable mixed precision for numerical stability
             with torch.cuda.amp.autocast(enabled=False):
                 return self._forward(*args, **kwargs)
         else:
@@ -394,7 +380,7 @@ class NewWangchanSelfAttention(Module):
 
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers in NewWangchanModel forward() function)
+            # Apply the attention mask is (precomputed for all layers in PadThaiModel forward() function)
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
@@ -421,9 +407,9 @@ class NewWangchanSelfAttention(Module):
         return outputs
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertSelfOutput with Camembert->NewWangchan
-class NewWangchanSelfOutput(Module):
-    def __init__(self, config: NewWangchanConfig):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertSelfOutput with Camembert->PadThai
+class PadThaiSelfOutput(Module):
+    def __init__(self, config: PadThaiConfig):
         super().__init__()
         self.dense = Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -436,12 +422,12 @@ class NewWangchanSelfOutput(Module):
         return hidden_states
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertAttention with Camembert->NewWangchan
-class NewWangchanAttention(Module):
-    def __init__(self, config: NewWangchanConfig, position_embedding_type=None):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertAttention with Camembert->PadThai
+class PadThaiAttention(Module):
+    def __init__(self, config: PadThaiConfig, position_embedding_type=None):
         super().__init__()
-        self.self = NewWangchanSelfAttention(config, position_embedding_type=position_embedding_type)
-        self.output = NewWangchanSelfOutput(config)
+        self.self = PadThaiSelfAttention(config, position_embedding_type=position_embedding_type)
+        self.output = PadThaiSelfOutput(config)
         self.pruned_heads = set()
 
     def prune_heads(self, heads):
@@ -486,9 +472,9 @@ class NewWangchanAttention(Module):
         return outputs
 
 
-# Copied from transformers.models.bert.modeling_bert.BertIntermediate with Bert->Roberta->Camembert->NewWangchan
-class NewWangchanIntermediate(Module):
-    def __init__(self, config: NewWangchanConfig):
+# Copied from transformers.models.bert.modeling_bert.BertIntermediate with Bert->Roberta->Camembert->PadThai
+class PadThaiIntermediate(Module):
+    def __init__(self, config: PadThaiConfig):
         super().__init__()
         self.dense = Linear(config.hidden_size, config.intermediate_size)
         if isinstance(config.hidden_act, str):
@@ -502,9 +488,9 @@ class NewWangchanIntermediate(Module):
         return hidden_states
 
 
-# Copied from transformers.models.bert.modeling_bert.BertOutput with Bert->Roberta->Camembert->NewWangchan
-class NewWangchanOutput(Module):
-    def __init__(self, config: NewWangchanConfig):
+# Copied from transformers.models.bert.modeling_bert.BertOutput with Bert->Roberta->Camembert->PadThai
+class PadThaiOutput(Module):
+    def __init__(self, config: PadThaiConfig):
         super().__init__()
         self.dense = Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -517,21 +503,21 @@ class NewWangchanOutput(Module):
         return hidden_states
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertLayer with Camembert->NewWangchan
-class NewWangchanLayer(Module):
-    def __init__(self, config: NewWangchanConfig):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertLayer with Camembert->PadThai
+class PadThaiLayer(Module):
+    def __init__(self, config: PadThaiConfig):
         super().__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
-        self.attention = NewWangchanAttention(config)
+        self.attention = PadThaiAttention(config)
         self.is_decoder = config.is_decoder
         self.add_cross_attention = config.add_cross_attention
         if self.add_cross_attention:
             if not self.is_decoder:
                 raise ValueError(f"{self} should be used as a decoder model if cross attention is added")
-            self.crossattention = NewWangchanAttention(config, position_embedding_type="absolute")
-        self.intermediate = NewWangchanIntermediate(config)
-        self.output = NewWangchanOutput(config)
+            self.crossattention = PadThaiAttention(config, position_embedding_type="absolute")
+        self.intermediate = PadThaiIntermediate(config)
+        self.output = PadThaiOutput(config)
 
     def forward(
         self,
@@ -604,12 +590,12 @@ class NewWangchanLayer(Module):
         return layer_output
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertEncoder with Camembert->NewWangchan
-class NewWangchanEncoder(Module):
-    def __init__(self, config: NewWangchanConfig):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertEncoder with Camembert->PadThai
+class PadThaiEncoder(Module):
+    def __init__(self, config: PadThaiConfig):
         super().__init__()
         self.config = config
-        self.layer = ModuleList([NewWangchanLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = ModuleList([PadThaiLayer(config) for _ in range(config.num_hidden_layers)])
         self.gradient_checkpointing = False
 
     def forward(
@@ -704,8 +690,8 @@ class NewWangchanEncoder(Module):
 
 
 # Copied from transformers.models.bert.modeling_bert.BertPooler
-class NewWangchanPooler(Module):
-    def __init__(self, config: NewWangchanConfig):
+class PadThaiPooler(Module):
+    def __init__(self, config: PadThaiConfig):
         super().__init__()
         self.dense = Linear(config.hidden_size, config.hidden_size)
         self.activation = Tanh()
@@ -719,14 +705,13 @@ class NewWangchanPooler(Module):
         return pooled_output
 
 
-class NewWangchanPreTrainedModel(PreTrainedModel):
+class PadThaiPreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
     models.
     """
-
-    config_class = NewWangchanConfig
-    base_model_prefix = "roberta"
+    config_class = PadThaiConfig
+    base_model_prefix = "pad_thai"
     supports_gradient_checkpointing = True
 
     # Copied from transformers.models.bert.modeling_bert.BertPreTrainedModel._init_weights
@@ -747,7 +732,7 @@ class NewWangchanPreTrainedModel(PreTrainedModel):
             module.weight.data.fill_(1.0)
 
     def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, NewWangchanEncoder):
+        if isinstance(module, PadThaiEncoder):
             module.gradient_checkpointing = value
 
     def update_keys_to_ignore(self, config, del_keys_to_ignore):
@@ -759,11 +744,11 @@ class NewWangchanPreTrainedModel(PreTrainedModel):
                 k for k in self._keys_to_ignore_on_load_missing if k not in del_keys_to_ignore
             ]
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertLMHead with Camembert->NewWangchan
-class NewWangchanLMHead(Module):
-    """NewWangchan Head for masked language modeling."""
+# Copied from transformers.models.camembert.modeling_camembert.CamembertLMHead with Camembert->PadThai
+class PadThaiLMHead(Module):
+    """PadThai Head for masked language modeling."""
 
-    def __init__(self, config: NewWangchanConfig):
+    def __init__(self, config: PadThaiConfig):
         super().__init__()
         self.dense = Linear(config.hidden_size, config.hidden_size)
         self.layer_norm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -801,9 +786,8 @@ class NewWangchanLMHead(Module):
         else:
             self.new_bias = self.new_decoder.bias
 
-class NewWangchanModel(NewWangchanPreTrainedModel):
+class PadThaiModel(PadThaiPreTrainedModel):
     """
-
     The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
     cross-attention is added between the self-attention layers, following the architecture described in *Attention is
     all you need*_ by Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz
@@ -814,21 +798,20 @@ class NewWangchanModel(NewWangchanPreTrainedModel):
     `add_cross_attention` set to `True`; an `encoder_hidden_states` is then expected as an input to the forward pass.
 
     .. _*Attention is all you need*: https://arxiv.org/abs/1706.03762
-
     """
 
     _keys_to_ignore_on_load_missing = [r"position_ids"]
     _no_split_modules = []
 
-    # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Roberta->Camembert->NewWangchan
-    def __init__(self, config: NewWangchanConfig, add_pooling_layer=True):
+    # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Roberta->Camembert->PadThai
+    def __init__(self, config: PadThaiConfig, add_pooling_layer=True):
         super().__init__(config)
         self.config = config
 
-        self.embeddings = NewWangchanEmbeddings(config)
-        self.encoder = NewWangchanEncoder(config)
+        self.embeddings = PadThaiEmbeddings(config)
+        self.encoder = PadThaiEncoder(config)
 
-        self.pooler = NewWangchanPooler(config) if add_pooling_layer else None
+        self.pooler = PadThaiPooler(config) if add_pooling_layer else None
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -865,7 +848,7 @@ class NewWangchanModel(NewWangchanPreTrainedModel):
         output_hidden_states: bool | None = None,
         return_dict: bool | None = None,
     ) -> tuple[torch.Tensor] | BaseModelOutputWithPoolingAndCrossAttentions:
-        r"""
+        """
         encoder_hidden_states  (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
             Sequence of hidden-states at the output of the last layer of the encoder. Used in the cross-attention if
             the model is configured as a decoder.
@@ -978,8 +961,8 @@ class NewWangchanModel(NewWangchanPreTrainedModel):
             cross_attentions=encoder_outputs.cross_attentions,
         )
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertForMaskedLM with Camembert->NewWangchan
-class NewWangchanForMaskedLM(NewWangchanPreTrainedModel):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertForMaskedLM with Camembert->PadThai
+class PadThaiForMaskedLM(PadThaiPreTrainedModel):
 
     _keys_to_ignore_on_save = [
         r"lm_head.old_decoder.weight",
@@ -996,17 +979,17 @@ class NewWangchanForMaskedLM(NewWangchanPreTrainedModel):
     ]
     _keys_to_ignore_on_load_unexpected = [r"pooler"]
 
-    def __init__(self, config: NewWangchanConfig):
+    def __init__(self, config: PadThaiConfig):
         super().__init__(config)
 
         if config.is_decoder:
             logger.warning(
-                "If you want to use `NewWangchanForMaskedLM` make sure `config.is_decoder=False` for "
+                "If you want to use `PadThaiForMaskedLM` make sure `config.is_decoder=False` for "
                 "bi-directional self-attention."
             )
 
-        self.roberta = NewWangchanModel(config, add_pooling_layer=False)
-        self.lm_head = NewWangchanLMHead(config)
+        self.roberta = PadThaiModel(config, add_pooling_layer=False)
+        self.lm_head = PadThaiLMHead(config)
 
         # The LM head weights require special treatment only when they are tied with the word embeddings
         self.update_keys_to_ignore(
@@ -1023,7 +1006,7 @@ class NewWangchanForMaskedLM(NewWangchanPreTrainedModel):
         camembert_for_masked_lm: CamembertForMaskedLM,
         num_total_vocab: int
     ):
-        config = NewWangchanConfig.from_camembert_config(
+        config = PadThaiConfig.from_camembert_config(
             camembert_for_masked_lm.config,
             num_total_vocab
         )

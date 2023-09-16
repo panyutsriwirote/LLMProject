@@ -1,4 +1,4 @@
-from .new_wangchan import NewWangchanForMaskedLM
+from .pad_thai import PadThaiForMaskedLM
 from .preprocess import process_transformers
 from .accelerator import CustomAccelerator
 from .config import Config

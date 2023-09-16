@@ -129,7 +129,8 @@ DATASET_NAME_TO_TASK: dict[str, Task] = {
     "thai_nner_layer_5": "named_entity_recognition",
     "thai_nner_layer_6": "named_entity_recognition",
     "thai_nner_layer_7": "named_entity_recognition",
-    "thai_nner_layer_8": "named_entity_recognition"
+    "thai_nner_layer_8": "named_entity_recognition",
+    "wongnai_yelp": "single_label_classification"
 }
 
 def finetune_on_dataset(

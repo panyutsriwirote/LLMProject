@@ -1,5 +1,5 @@
 from script import (
-    NewWangchanForMaskedLM,
+    PadThaiForMaskedLM,
     CustomAccelerator as Accelerator,
     Config,
     get_layer_params,
@@ -63,7 +63,7 @@ def main(config: Config):
         )
 
         # Load model
-        model = NewWangchanForMaskedLM.from_pretrained("model")
+        model = PadThaiForMaskedLM.from_pretrained("model")
 
         # Validate layer config
         if layer_config is not None:
