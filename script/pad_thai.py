@@ -711,7 +711,7 @@ class PadThaiPreTrainedModel(PreTrainedModel):
     models.
     """
     config_class = PadThaiConfig
-    base_model_prefix = "pad_thai"
+    base_model_prefix = "roberta"
     supports_gradient_checkpointing = True
 
     # Copied from transformers.models.bert.modeling_bert.BertPreTrainedModel._init_weights
