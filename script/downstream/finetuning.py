@@ -139,6 +139,8 @@ def finetune_on_dataset(
     id2label: dict[int, str],
     model_dir: str,
     tokenizer: PreTrainedTokenizer,
+    do_train: bool = True,
+    do_test: bool = True,
     override_default: dict[str] | None = None
 ):
     # Get model
@@ -204,10 +206,14 @@ def finetune_on_dataset(
         data_collator=data_collator,
         compute_metrics=f1_metrics(task, id2label)
     )
-    try:
-        trainer.train()
-    except KeyboardInterrupt:
-        pass
-    print("**Evaluate on test set**")
-    print('\n'.join(f"{k}: {v}" for k, v in trainer.predict(test_dataset=dataset["test"]).metrics.items()))
+
+    if do_train:
+        try:
+            trainer.train()
+        except KeyboardInterrupt:
+            pass
+    if do_test:
+        print("**Evaluate on test set**")
+        print('\n'.join(f"{k}: {v}" for k, v in trainer.predict(test_dataset=dataset["test"]).metrics.items()))
+
     return trainer
