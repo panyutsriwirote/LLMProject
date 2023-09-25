@@ -1,3 +1,3 @@
-from .datasets import get_downstream_dataset
+from .datasets import get_downstream_dataset, get_downstream_dataset_no_special_preprocessing
 from .finetuning import finetune_on_dataset
 from .hyperparameter import hp_search_on_dataset

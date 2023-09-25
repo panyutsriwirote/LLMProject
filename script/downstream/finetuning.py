@@ -172,6 +172,12 @@ def finetune_on_dataset(
         steps = 20
     else:
         steps = 100
+    if dataset.name.startswith("thai_nner_layer_"):
+        num_train_epochs = 20
+    elif task in ("named_entity_recognition", "token_classification"):
+        num_train_epochs = 6
+    else:
+        num_train_epochs = 3
     args = dict(
         output_dir=path.join("finetuned_models", dataset.name),
         overwrite_output_dir=True,
@@ -188,7 +194,7 @@ def finetune_on_dataset(
         adam_beta1=0.9,
         adam_beta2=0.999,
         adam_epsilon=1e-8,
-        num_train_epochs=6 if task in ("named_entity_recognition", "token_classification") else 3,
+        num_train_epochs=num_train_epochs,
         fp16=True,
         load_best_model_at_end=True,
         metric_for_best_model=metric_for_best_model
