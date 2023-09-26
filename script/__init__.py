@@ -5,8 +5,7 @@ from .config import Config
 from .downstream import (
     get_downstream_dataset,
     get_downstream_dataset_no_special_preprocessing,
-    finetune_on_dataset,
-    hp_search_on_dataset
+    finetune_on_dataset
 )
 from .utils import (
     get_layer_params,
