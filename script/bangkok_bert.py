@@ -14,7 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""PyTorch PadThaiBERTa model."""
+"""
+        ## PyTorch BangkokBERT model ##
+These models aren't meant to be used by end users.
+They are developed so that the added vocab's embeddings
+can be trained separately from the original vocab's embeddings.
+See the BangkokBERTEmbeddings class for how this is implemented.
+"""
 
 import math, torch
 from torch.utils.checkpoint import checkpoint
@@ -49,9 +55,9 @@ from transformers.pytorch_utils import (
 
 logger = get_logger(__name__)
 
-class PadThaiConfig(PretrainedConfig):
+class BangkokBERTConfig(PretrainedConfig):
 
-    model_type = "pad_thai"
+    model_type = "bangkok_bert"
 
     def __init__(
         self,
@@ -151,10 +157,10 @@ class PadThaiConfig(PretrainedConfig):
             classifier_dropout=self.classifier_dropout,
         )
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertEmbeddings with Camembert->PadThai
-class PadThaiEmbeddings(Module):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertEmbeddings with Camembert->BangkokBERT
+class BangkokBERTEmbeddings(Module):
 
-    def __init__(self, config: PadThaiConfig):
+    def __init__(self, config: BangkokBERTConfig):
         super().__init__()
         self.num_old_embeddings = config.old_vocab_size
         self.embedding_dim = config.hidden_size
@@ -264,9 +270,9 @@ class PadThaiEmbeddings(Module):
         return incremental_indices.long() + self.padding_idx
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertSelfAttention with Camembert->PadThai
-class PadThaiSelfAttention(Module):
-    def __init__(self, config: PadThaiConfig, position_embedding_type=None):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertSelfAttention with Camembert->BangkokBERT
+class BangkokBERTSelfAttention(Module):
+    def __init__(self, config: BangkokBERTConfig, position_embedding_type=None):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
             raise ValueError(
@@ -380,7 +386,7 @@ class PadThaiSelfAttention(Module):
 
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers in PadThaiModel forward() function)
+            # Apply the attention mask is (precomputed for all layers in BangkokBERTModel forward() function)
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
@@ -407,9 +413,9 @@ class PadThaiSelfAttention(Module):
         return outputs
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertSelfOutput with Camembert->PadThai
-class PadThaiSelfOutput(Module):
-    def __init__(self, config: PadThaiConfig):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertSelfOutput with Camembert->BangkokBERT
+class BangkokBERTSelfOutput(Module):
+    def __init__(self, config: BangkokBERTConfig):
         super().__init__()
         self.dense = Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -422,12 +428,12 @@ class PadThaiSelfOutput(Module):
         return hidden_states
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertAttention with Camembert->PadThai
-class PadThaiAttention(Module):
-    def __init__(self, config: PadThaiConfig, position_embedding_type=None):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertAttention with Camembert->BangkokBERT
+class BangkokBERTAttention(Module):
+    def __init__(self, config: BangkokBERTConfig, position_embedding_type=None):
         super().__init__()
-        self.self = PadThaiSelfAttention(config, position_embedding_type=position_embedding_type)
-        self.output = PadThaiSelfOutput(config)
+        self.self = BangkokBERTSelfAttention(config, position_embedding_type=position_embedding_type)
+        self.output = BangkokBERTSelfOutput(config)
         self.pruned_heads = set()
 
     def prune_heads(self, heads):
@@ -472,9 +478,9 @@ class PadThaiAttention(Module):
         return outputs
 
 
-# Copied from transformers.models.bert.modeling_bert.BertIntermediate with Bert->Roberta->Camembert->PadThai
-class PadThaiIntermediate(Module):
-    def __init__(self, config: PadThaiConfig):
+# Copied from transformers.models.bert.modeling_bert.BertIntermediate with Bert->Roberta->Camembert->BangkokBERT
+class BangkokBERTIntermediate(Module):
+    def __init__(self, config: BangkokBERTConfig):
         super().__init__()
         self.dense = Linear(config.hidden_size, config.intermediate_size)
         if isinstance(config.hidden_act, str):
@@ -488,9 +494,9 @@ class PadThaiIntermediate(Module):
         return hidden_states
 
 
-# Copied from transformers.models.bert.modeling_bert.BertOutput with Bert->Roberta->Camembert->PadThai
-class PadThaiOutput(Module):
-    def __init__(self, config: PadThaiConfig):
+# Copied from transformers.models.bert.modeling_bert.BertOutput with Bert->Roberta->Camembert->BangkokBERT
+class BangkokBERTOutput(Module):
+    def __init__(self, config: BangkokBERTConfig):
         super().__init__()
         self.dense = Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -503,21 +509,21 @@ class PadThaiOutput(Module):
         return hidden_states
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertLayer with Camembert->PadThai
-class PadThaiLayer(Module):
-    def __init__(self, config: PadThaiConfig):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertLayer with Camembert->BangkokBERT
+class BangkokBERTLayer(Module):
+    def __init__(self, config: BangkokBERTConfig):
         super().__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
-        self.attention = PadThaiAttention(config)
+        self.attention = BangkokBERTAttention(config)
         self.is_decoder = config.is_decoder
         self.add_cross_attention = config.add_cross_attention
         if self.add_cross_attention:
             if not self.is_decoder:
                 raise ValueError(f"{self} should be used as a decoder model if cross attention is added")
-            self.crossattention = PadThaiAttention(config, position_embedding_type="absolute")
-        self.intermediate = PadThaiIntermediate(config)
-        self.output = PadThaiOutput(config)
+            self.crossattention = BangkokBERTAttention(config, position_embedding_type="absolute")
+        self.intermediate = BangkokBERTIntermediate(config)
+        self.output = BangkokBERTOutput(config)
 
     def forward(
         self,
@@ -590,12 +596,12 @@ class PadThaiLayer(Module):
         return layer_output
 
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertEncoder with Camembert->PadThai
-class PadThaiEncoder(Module):
-    def __init__(self, config: PadThaiConfig):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertEncoder with Camembert->BangkokBERT
+class BangkokBERTEncoder(Module):
+    def __init__(self, config: BangkokBERTConfig):
         super().__init__()
         self.config = config
-        self.layer = ModuleList([PadThaiLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = ModuleList([BangkokBERTLayer(config) for _ in range(config.num_hidden_layers)])
         self.gradient_checkpointing = False
 
     def forward(
@@ -690,8 +696,8 @@ class PadThaiEncoder(Module):
 
 
 # Copied from transformers.models.bert.modeling_bert.BertPooler
-class PadThaiPooler(Module):
-    def __init__(self, config: PadThaiConfig):
+class BangkokBERTPooler(Module):
+    def __init__(self, config: BangkokBERTConfig):
         super().__init__()
         self.dense = Linear(config.hidden_size, config.hidden_size)
         self.activation = Tanh()
@@ -705,12 +711,12 @@ class PadThaiPooler(Module):
         return pooled_output
 
 
-class PadThaiPreTrainedModel(PreTrainedModel):
+class BangkokBERTPreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
     models.
     """
-    config_class = PadThaiConfig
+    config_class = BangkokBERTConfig
     base_model_prefix = "roberta"
     supports_gradient_checkpointing = True
 
@@ -732,7 +738,7 @@ class PadThaiPreTrainedModel(PreTrainedModel):
             module.weight.data.fill_(1.0)
 
     def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, PadThaiEncoder):
+        if isinstance(module, BangkokBERTEncoder):
             module.gradient_checkpointing = value
 
     def update_keys_to_ignore(self, config, del_keys_to_ignore):
@@ -744,11 +750,11 @@ class PadThaiPreTrainedModel(PreTrainedModel):
                 k for k in self._keys_to_ignore_on_load_missing if k not in del_keys_to_ignore
             ]
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertLMHead with Camembert->PadThai
-class PadThaiLMHead(Module):
-    """PadThai Head for masked language modeling."""
+# Copied from transformers.models.camembert.modeling_camembert.CamembertLMHead with Camembert->BangkokBERT
+class BangkokBERTLMHead(Module):
+    """BangkokBERT Head for masked language modeling."""
 
-    def __init__(self, config: PadThaiConfig):
+    def __init__(self, config: BangkokBERTConfig):
         super().__init__()
         self.dense = Linear(config.hidden_size, config.hidden_size)
         self.layer_norm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -786,7 +792,7 @@ class PadThaiLMHead(Module):
         else:
             self.new_bias = self.new_decoder.bias
 
-class PadThaiModel(PadThaiPreTrainedModel):
+class BangkokBERTModel(BangkokBERTPreTrainedModel):
     """
     The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
     cross-attention is added between the self-attention layers, following the architecture described in *Attention is
@@ -803,15 +809,15 @@ class PadThaiModel(PadThaiPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"position_ids"]
     _no_split_modules = []
 
-    # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Roberta->Camembert->PadThai
-    def __init__(self, config: PadThaiConfig, add_pooling_layer=True):
+    # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Roberta->Camembert->BangkokBERT
+    def __init__(self, config: BangkokBERTConfig, add_pooling_layer=True):
         super().__init__(config)
         self.config = config
 
-        self.embeddings = PadThaiEmbeddings(config)
-        self.encoder = PadThaiEncoder(config)
+        self.embeddings = BangkokBERTEmbeddings(config)
+        self.encoder = BangkokBERTEncoder(config)
 
-        self.pooler = PadThaiPooler(config) if add_pooling_layer else None
+        self.pooler = BangkokBERTPooler(config) if add_pooling_layer else None
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -961,8 +967,8 @@ class PadThaiModel(PadThaiPreTrainedModel):
             cross_attentions=encoder_outputs.cross_attentions,
         )
 
-# Copied from transformers.models.camembert.modeling_camembert.CamembertForMaskedLM with Camembert->PadThai
-class PadThaiForMaskedLM(PadThaiPreTrainedModel):
+# Copied from transformers.models.camembert.modeling_camembert.CamembertForMaskedLM with Camembert->BangkokBERT
+class BangkokBERTForMaskedLM(BangkokBERTPreTrainedModel):
 
     _keys_to_ignore_on_save = [
         r"lm_head.old_decoder.weight",
@@ -979,17 +985,17 @@ class PadThaiForMaskedLM(PadThaiPreTrainedModel):
     ]
     _keys_to_ignore_on_load_unexpected = [r"pooler"]
 
-    def __init__(self, config: PadThaiConfig):
+    def __init__(self, config: BangkokBERTConfig):
         super().__init__(config)
 
         if config.is_decoder:
             logger.warning(
-                "If you want to use `PadThaiForMaskedLM` make sure `config.is_decoder=False` for "
+                "If you want to use `BangkokBERTForMaskedLM` make sure `config.is_decoder=False` for "
                 "bi-directional self-attention."
             )
 
-        self.roberta = PadThaiModel(config, add_pooling_layer=False)
-        self.lm_head = PadThaiLMHead(config)
+        self.roberta = BangkokBERTModel(config, add_pooling_layer=False)
+        self.lm_head = BangkokBERTLMHead(config)
 
         # The LM head weights require special treatment only when they are tied with the word embeddings
         self.update_keys_to_ignore(
@@ -1006,7 +1012,7 @@ class PadThaiForMaskedLM(PadThaiPreTrainedModel):
         camembert_for_masked_lm: CamembertForMaskedLM,
         num_total_vocab: int
     ):
-        config = PadThaiConfig.from_camembert_config(
+        config = BangkokBERTConfig.from_camembert_config(
             camembert_for_masked_lm.config,
             num_total_vocab
         )
