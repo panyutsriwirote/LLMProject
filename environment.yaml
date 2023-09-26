@@ -237,7 +237,6 @@ dependencies:
       - mako==1.2.4
       - multidict==6.0.4
       - multiprocess==0.70.14
-      - optuna==3.3.0
       - pandas==2.0.3
       - protobuf==3.20.0
       - pyarrow==12.0.1
