@@ -1,5 +1,5 @@
 from script import (
-    BangkokBERTForMaskedLM,
+    PhayaThaiBERTForMaskedLM,
     CustomAccelerator as Accelerator,
     Config,
     get_layer_params,
@@ -63,7 +63,7 @@ def main(config: Config):
         )
 
         # Load model
-        model = BangkokBERTForMaskedLM.from_pretrained("model")
+        model = PhayaThaiBERTForMaskedLM.from_pretrained("model")
 
         # Validate layer config
         if layer_config is not None:

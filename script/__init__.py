@@ -1,4 +1,4 @@
-from .bangkok_bert import BangkokBERTForMaskedLM
+from .phayathaibert import PhayaThaiBERTForMaskedLM
 from .preprocess import process_transformers
 from .accelerator import CustomAccelerator
 from .config import Config
